@@ -156,7 +156,9 @@ function render(e) {
       const el = permissionEls.get(e.id);
       if (el) {
         el.classList.add("resolved");
-        el.querySelector(".buttons").textContent = e.accepted ? "Switched to the tab." : "Skipped; the agent will check another way.";
+        el.querySelector(".buttons").textContent = e.accepted
+          ? "Switched to the tab."
+          : `Not switched (${e.reason ?? "declined"}); the agent will check another way.`;
       }
       break;
     }

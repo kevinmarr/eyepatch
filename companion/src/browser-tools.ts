@@ -117,7 +117,7 @@ export function createBrowserTools(bridge: Bridge) {
       "screenshot",
       {
         description:
-          "Capture the visible part of the tab as a PNG, scaled to CSS pixels (so image coordinates match getBoundingClientRect / elementFromPoint unless a scale factor is reported). If the user has switched to another tab, they're asked to switch back first; if they don't, this fails and you should verify with the other tools instead.",
+          "Capture the visible part of the tab as a PNG, scaled to CSS pixels (so image coordinates match getBoundingClientRect / elementFromPoint unless a scale factor is reported). If the user has switched to another tab, they're asked to switch back and this waits until they do (or decline, in which case verify with the other tools instead).",
         inputSchema: z.object({}),
       },
       () =>
@@ -136,8 +136,8 @@ export function createBrowserTools(bridge: Bridge) {
               { type: "text", text: note },
             ];
           },
-          // May wait for the user to switch back to the tab (90s in the extension).
-          120_000,
+          // May wait for the user to switch back to the tab, which has no time limit.
+          Infinity,
         ),
     );
 

@@ -53,6 +53,7 @@ async function connect() {
   socket.onclose = () => {
     if (ws !== socket) return;
     ws = null;
+    declineTabRequests("the companion disconnected");
     companion = { connected: false, agent: null, ready: false, busy: false };
     broadcastState();
     setTimeout(connect, 2000);
@@ -141,11 +142,11 @@ chrome.runtime.onConnect.addListener((port) => {
         break;
       }
       case "cancel":
-        for (const resolve of [...tabRequests.values()]) resolve(false);
+        declineTabRequests("the user stopped the agent");
         send({ type: "cancel" });
         break;
       case "tab_response":
-        tabRequests.get(msg.id)?.(Boolean(msg.accept));
+        tabRequests.get(msg.id)?.(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
         break;
       case "new_session":
         transcript = [];
@@ -189,42 +190,53 @@ async function targetTab() {
 }
 
 const BACKGROUND_TAB_HELP =
-  "The user has switched away from this tab and didn't switch back when asked, and Chrome can only screenshot the tab that's visible. get_page_content, query_selector_all, run_js and get_console_logs still work on this tab; use them to verify instead.";
-
-const TAB_REQUEST_TIMEOUT_MS = 90_000;
+  "Chrome can only screenshot the tab the user is looking at, and they're on another tab. get_page_content, query_selector_all, run_js and get_console_logs still work on this tab; use them to verify instead.";
 
 /**
- * Ask the user (via a card in the side panel) to switch back to `tab` so it
- * can be screenshotted. Resolves true once the tab is visible: they clicked
- * "Switch to tab" (in the panel or a notification) or switched to it
- * themselves. Resolves false if they decline, stop the agent, or it times out.
+ * Ask the user (via a card in the side panel, plus a notification if they're
+ * not watching it) to switch back to `tab` so it can be screenshotted. There's
+ * deliberately no timeout: the agent waits until the user acts. Resolves
+ * { ok: true } once the tab is visible: they clicked "Switch to tab" or
+ * switched to it themselves. Otherwise { ok: false, reason }.
  */
 function requestTabSwitch(tab) {
   const id = `t${++tabRequestSeq}`;
   return new Promise((resolve) => {
-    const finish = async (accepted) => {
+    // byUser: they activated the tab themselves, so there's nothing to switch.
+    const finish = async ({ accepted, reason, byUser = false }) => {
       if (!tabRequests.has(id)) return;
       tabRequests.delete(id);
-      clearTimeout(timer);
       chrome.tabs.onActivated.removeListener(onActivated);
       if (accepted) {
         try {
-          await chrome.tabs.update(tab.id, { active: true });
-          await chrome.windows.update(tab.windowId, { focused: true });
+          if (!byUser) {
+            await chrome.tabs.update(tab.id, { active: true });
+            await chrome.windows.update(tab.windowId, { focused: true });
+          }
           await new Promise((r) => setTimeout(r, 400)); // let it paint
-        } catch {
-          accepted = false;
+        } catch (e) {
+          // Only a failure if the tab didn't end up in front anyway.
+          const now = await chrome.tabs.get(tab.id).catch(() => null);
+          if (!now?.active) {
+            accepted = false;
+            reason = `switching to the tab failed: ${e?.message ?? e}`;
+          }
         }
       }
-      record({ type: "tab_request_resolved", id, accepted });
-      resolve(accepted);
+      console.log(`[site-modder] tab request ${id}:`, accepted ? "switched" : reason);
+      record({ type: "tab_request_resolved", id, accepted, reason });
+      resolve(accepted ? { ok: true } : { ok: false, reason });
     };
-    const onActivated = (info) => info.tabId === tab.id && finish(true);
-    const timer = setTimeout(() => finish(false), TAB_REQUEST_TIMEOUT_MS);
+    const onActivated = (info) => info.tabId === tab.id && finish({ accepted: true, byUser: true });
     chrome.tabs.onActivated.addListener(onActivated);
     tabRequests.set(id, finish);
     record({ type: "tab_request", id, tabId: tab.id, title: tab.title, url: tab.url, purpose: "take a screenshot" });
   });
+}
+
+/** Resolve every open tab request as declined (agent stopped, companion gone). */
+function declineTabRequests(reason) {
+  for (const finish of [...tabRequests.values()]) finish({ accepted: false, reason });
 }
 
 /** Origin + path, ignoring query and hash (tracking params, in-page anchors). */
@@ -359,7 +371,8 @@ const tools = {
   async screenshot() {
     let tab = await targetTab();
     if (!tab.active) {
-      if (!(await requestTabSwitch(tab))) throw new Error(BACKGROUND_TAB_HELP);
+      const { ok, reason } = await requestTabSwitch(tab);
+      if (!ok) throw new Error(`The user didn't switch back to the tab (${reason}). ${BACKGROUND_TAB_HELP}`);
       tab = await targetTab();
     }
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
@@ -711,7 +724,10 @@ async function attend(event) {
         message: clip(`Switch back to “${event.title || event.url}” so the agent can ${event.purpose}.`),
         buttons: ["Switch to tab", "Not now"],
         sticky: true,
-        onAction: (index) => tabRequests.get(event.id)?.(index !== 1),
+        onAction: (index) =>
+          tabRequests.get(event.id)?.(
+            index === 1 ? { accepted: false, reason: "the user chose Not now" } : { accepted: true },
+          ),
       });
       break;
     case "tab_request_resolved":

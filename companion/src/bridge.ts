@@ -17,7 +17,7 @@ type CallOptions = { timeoutMs?: number; skipBarrier?: boolean };
 type Pending = {
   resolve: (v: { result: unknown; warning?: string }) => void;
   reject: (e: Error) => void;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
 };
 
 /**
@@ -108,10 +108,14 @@ export class Bridge {
     if (!this.connected) throw new Error("Extension is not connected");
     const id = `c${++this.seq}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Browser call ${method} timed out`));
-      }, timeoutMs);
+      // Infinity = wait as long as it takes (e.g. for the user to switch tabs).
+      // The call still fails if the extension disconnects.
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => {
+            this.pending.delete(id);
+            reject(new Error(`Browser call ${method} timed out`));
+          }, timeoutMs)
+        : undefined;
       this.pending.set(id, { resolve: resolve as (v: { result: unknown; warning?: string }) => void, reject, timer });
       this.send({ type: "tool_call", id, method, params });
     });
