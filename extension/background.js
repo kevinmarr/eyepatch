@@ -1,0 +1,504 @@
+// site-modder service worker: owns the WebSocket to the local companion,
+// runs browser tools for the agent, registers mods as user scripts, and
+// relays chat between the companion and any open side panels.
+
+const COMPANION_PORT = 7457;
+const COMPANION_URL = `ws://127.0.0.1:${COMPANION_PORT}`;
+const PROBE_URL = `http://127.0.0.1:${COMPANION_PORT}/`;
+const MAX_TRANSCRIPT = 2000;
+const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model API anyway
+
+let ws = null;
+let companion = { connected: false, agent: null, ready: false, busy: false };
+let transcript = []; // chat events, replayed to side panels when they open
+let windowId = null; // window of the panel that sent the last prompt
+let modErrors = {}; // mod id -> registration error
+let lastMods = new Map(); // mod id -> mod, to tell CSS-only changes apart
+const panels = new Set();
+
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+// ---------- companion connection ----------
+
+let probing = false;
+
+async function connect() {
+  if (probing) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  // Chrome logs every refused WebSocket as an extension error, so check with a
+  // plain fetch first and only open the socket once something is listening.
+  // (The companion answers non-upgrade HTTP requests with 426; any response is fine.)
+  probing = true;
+  try {
+    await fetch(PROBE_URL, { cache: "no-store" });
+  } catch {
+    // Companion not running. Retry fast while a panel is open; otherwise the alarm retries.
+    if (panels.size) setTimeout(connect, 2000);
+    return;
+  } finally {
+    probing = false;
+  }
+  if (ws) return;
+  const socket = new WebSocket(COMPANION_URL);
+  ws = socket;
+  socket.onopen = () => {
+    companion = { ...companion, connected: true };
+    send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version });
+    broadcastState();
+  };
+  socket.onclose = () => {
+    if (ws !== socket) return;
+    ws = null;
+    companion = { connected: false, agent: null, ready: false, busy: false };
+    broadcastState();
+    setTimeout(connect, 2000);
+  };
+  socket.onerror = () => {};
+  socket.onmessage = (ev) => {
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    onCompanionMessage(msg).catch((e) => console.error("[site-modder]", e));
+  };
+}
+
+function send(msg) {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+// Service workers get suspended; an alarm brings us back to reconnect.
+chrome.alarms.create("reconnect", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => a.name === "reconnect" && connect());
+chrome.runtime.onStartup.addListener(connect);
+chrome.runtime.onInstalled.addListener(connect);
+connect();
+
+async function onCompanionMessage(msg) {
+  switch (msg.type) {
+    case "ping":
+      return;
+    case "status":
+      companion = { ...companion, ...msg, connected: true };
+      return broadcastState();
+    case "session_update":
+    case "turn_end":
+    case "error":
+    case "permission_request":
+    case "permission_resolved":
+      return record(msg);
+    case "tool_call":
+      return runTool(msg);
+    case "reload_extension":
+      return chrome.runtime.reload();
+  }
+}
+
+// ---------- side panels ----------
+
+function record(event) {
+  transcript.push(event);
+  if (transcript.length > MAX_TRANSCRIPT) transcript = transcript.slice(-MAX_TRANSCRIPT);
+  for (const p of panels) p.postMessage({ type: "event", event });
+}
+
+function state() {
+  return { companion, userScripts: userScriptsAvailable(), modErrors };
+}
+
+function broadcastState() {
+  for (const p of panels) p.postMessage({ type: "state", state: state() });
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "sidepanel") return;
+  panels.add(port);
+  connect();
+  port.postMessage({ type: "init", state: state(), transcript });
+  port.onDisconnect.addListener(() => panels.delete(port));
+  port.onMessage.addListener(async (msg) => {
+    switch (msg.type) {
+      case "prompt": {
+        windowId = msg.windowId ?? windowId;
+        const tab = await activeTab().catch(() => null);
+        record({ type: "user_message", text: msg.text, url: tab?.url });
+        send({ type: "prompt", text: msg.text, page: tab && { tabId: tab.id, url: tab.url, title: tab.title } });
+        break;
+      }
+      case "cancel":
+        send({ type: "cancel" });
+        break;
+      case "new_session":
+        transcript = [];
+        send({ type: "new_session" });
+        for (const p of panels) p.postMessage({ type: "init", state: state(), transcript });
+        break;
+      case "permission_response":
+        send({ type: "permission_response", id: msg.id, optionId: msg.optionId });
+        break;
+      case "set_window":
+        windowId = msg.windowId;
+        break;
+    }
+  });
+});
+
+// ---------- browser tools (called by the agent) ----------
+
+async function activeTab() {
+  const query = windowId != null ? { active: true, windowId } : { active: true, lastFocusedWindow: true };
+  const [tab] = await chrome.tabs.query(query);
+  if (!tab) throw new Error("No active tab");
+  return tab;
+}
+
+function userScriptsAvailable() {
+  try {
+    chrome.userScripts.getScripts();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const USER_SCRIPTS_HELP =
+  'User scripts are disabled. Open chrome://extensions, click "Details" on site-modder and turn on "Allow User Scripts".';
+
+async function inPage(tabId, func, args) {
+  const [res] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
+  return res?.result;
+}
+
+async function blobToBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+const tools = {
+  async get_active_tab() {
+    const tab = await activeTab();
+    return { tabId: tab.id, url: tab.url, title: tab.title, status: tab.status };
+  },
+
+  async get_page_content({ selector, format = "html", maxChars = 30000 }) {
+    const tab = await activeTab();
+    return inPage(
+      tab.id,
+      (selector, format, maxChars) => {
+        const el = selector ? document.querySelector(selector) : document.body;
+        if (!el) return { error: `No element matches ${selector}` };
+        let content;
+        if (format === "text") {
+          content = el.innerText;
+        } else {
+          const clone = el.cloneNode(true);
+          clone.querySelectorAll("script, style, noscript, link[rel=stylesheet]").forEach((n) => n.remove());
+          clone.querySelectorAll("svg").forEach((n) => (n.innerHTML = ""));
+          for (const n of [clone, ...clone.querySelectorAll("*")]) {
+            for (const a of [...n.attributes]) {
+              if (a.value.length > 200) n.setAttribute(a.name, a.value.slice(0, 200) + "…");
+            }
+          }
+          content = clone.outerHTML;
+        }
+        return {
+          length: content.length,
+          truncated: content.length > maxChars,
+          content: content.slice(0, maxChars),
+        };
+      },
+      [selector ?? null, format, maxChars],
+    );
+  },
+
+  async query_selector_all({ selector, limit = 20 }) {
+    const tab = await activeTab();
+    return inPage(
+      tab.id,
+      (selector, limit) => {
+        const all = [...document.querySelectorAll(selector)];
+        return {
+          total: all.length,
+          elements: all.slice(0, limit).map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              tag: el.tagName.toLowerCase(),
+              id: el.id || undefined,
+              classes: [...el.classList],
+              attributes: Object.fromEntries(
+                [...el.attributes]
+                  .filter((a) => a.name.startsWith("data-") || a.name.startsWith("aria-") || a.name === "role")
+                  .map((a) => [a.name, a.value.slice(0, 100)]),
+              ),
+              text: (el.innerText ?? "").trim().slice(0, 150),
+              visible: r.width > 0 && r.height > 0,
+              html: el.outerHTML.slice(0, 300),
+            };
+          }),
+        };
+      },
+      [selector, limit],
+    );
+  },
+
+  async run_js({ code, world = "isolated" }) {
+    if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
+    const tab = await activeTab();
+    const [res] = await chrome.userScripts.execute({
+      target: { tabId: tab.id },
+      js: [{ code }],
+      world: world === "main" ? "MAIN" : "USER_SCRIPT",
+    });
+    if (res?.error) throw new Error(res.error);
+    return res?.result === undefined ? "undefined" : res.result;
+  },
+
+  async screenshot() {
+    const tab = await activeTab();
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    // Capture is in device pixels (2x on Retina). Scale to CSS pixels so image
+    // coordinates match getBoundingClientRect, capped at the model's image size.
+    const cssWidth = (await inPage(tab.id, () => window.innerWidth).catch(() => null)) ?? tab.width;
+    const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const width = Math.min(bmp.width, cssWidth || bmp.width, MAX_SCREENSHOT_EDGE);
+    const scale = width / bmp.width;
+    const height = Math.round(bmp.height * scale);
+    const canvas = new OffscreenCanvas(width, height);
+    canvas.getContext("2d").drawImage(bmp, 0, 0, width, height);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return {
+      base64: await blobToBase64(blob),
+      width,
+      height,
+      viewportWidth: cssWidth,
+      cssPxPerImagePx: cssWidth ? cssWidth / width : null,
+    };
+  },
+
+  async get_console_logs({ limit = 50, levels }) {
+    if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
+    const tab = await activeTab();
+    const read = `(() => { const b = globalThis.__smConsole; return b ? b.slice() : null; })()`;
+    const entries = [];
+    let installed = false;
+    for (const world of ["USER_SCRIPT", "MAIN"]) {
+      const [res] = await chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: read }], world });
+      if (Array.isArray(res?.result)) entries.push(...res.result);
+      else {
+        await chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: captureCode(world) }], world, injectImmediately: true });
+        installed = true;
+      }
+    }
+    const wanted = levels?.length ? entries.filter((e) => levels.includes(e.level)) : entries;
+    wanted.sort((a, b) => a.t - b.t);
+    return {
+      note: installed
+        ? "Console capture was not active on this page and has been started now. Call reload_tab and then get_console_logs again to see messages from page load."
+        : undefined,
+      total: wanted.length,
+      entries: wanted.slice(-limit).map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })),
+    };
+  },
+
+  async apply_mods({ mods, changed }) {
+    await syncMods(mods, changed ?? []);
+    return { errors: modErrors };
+  },
+
+  async reload_tab() {
+    const tab = await activeTab();
+    await reloadAndWait(tab.id);
+    return "reloaded";
+  },
+};
+
+async function runTool({ id, method, params }) {
+  try {
+    const fn = tools[method];
+    if (!fn) throw new Error(`Unknown browser method ${method}`);
+    send({ type: "tool_result", id, result: await fn(params ?? {}) });
+  } catch (e) {
+    send({ type: "tool_result", id, error: String(e?.message ?? e) });
+  }
+}
+
+function reloadAndWait(tabId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, timeoutMs);
+    function done() {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }
+    function listener(id, info) {
+      if (id === tabId && info.status === "complete") done();
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.reload(tabId);
+  });
+}
+
+// ---------- mods -> user scripts ----------
+
+const styleId = (modId) => `site-modder-${modId}`;
+
+function cssCode(modId, css) {
+  return `(() => {
+  const id = ${JSON.stringify(styleId(modId))};
+  let s = document.getElementById(id);
+  if (!s) {
+    s = document.createElement("style");
+    s.id = id;
+    (document.head || document.documentElement).appendChild(s);
+  }
+  s.textContent = ${JSON.stringify(css)};
+})();`;
+}
+
+function removeCssCode(modId) {
+  return `document.getElementById(${JSON.stringify(styleId(modId))})?.remove();`;
+}
+
+/**
+ * Console capture for one JS world. Each world (the page's MAIN world and the
+ * USER_SCRIPT world mods run in) has its own globals and console, so this is
+ * injected into both. Read back by get_console_logs.
+ */
+function captureCode(world) {
+  return `(() => {
+  if (globalThis.__smConsole) return;
+  const buf = (globalThis.__smConsole = []);
+  const fmt = (a) => {
+    try {
+      if (a instanceof Error) return a.stack || String(a);
+      if (a && typeof a === "object") return JSON.stringify(a);
+    } catch {}
+    return String(a);
+  };
+  const push = (level, args) => {
+    buf.push({ t: Date.now(), world: ${JSON.stringify(world === "MAIN" ? "page" : "mods")}, level, text: args.map(fmt).join(" ").slice(0, 2000) });
+    if (buf.length > 300) buf.shift();
+  };
+  for (const level of ["error", "warn", "log", "info"]) {
+    const orig = console[level];
+    console[level] = function (...args) {
+      push(level, args);
+      return orig.apply(this, args);
+    };
+  }
+  addEventListener("error", (e) => push("uncaught", [e.error || e.message]));
+  addEventListener("unhandledrejection", (e) => push("unhandledrejection", [e.reason]));
+})();`;
+}
+
+/** Records a mod's top-level exception (with the mod id) before rethrowing. */
+function wrapModJs(mod) {
+  return `try {
+${mod.js}
+} catch (e) {
+  (globalThis.__smConsole ||= []).push({ t: Date.now(), world: "mods", level: "uncaught", text: ${JSON.stringify(`[mod ${mod.id}] `)} + (e?.stack || e) });
+  throw e;
+}`;
+}
+
+function scriptsFor(mod) {
+  if (mod.error || !mod.enabled) return [];
+  const common = { matches: mod.matches, excludeMatches: mod.excludeMatches ?? [] };
+  const out = [];
+  if (mod.css) {
+    out.push({ ...common, id: `mod:${mod.id}:css`, js: [{ code: cssCode(mod.id, mod.css) }], runAt: "document_start", world: "USER_SCRIPT" });
+  }
+  if (mod.js) {
+    out.push({ ...common, id: `mod:${mod.id}:js`, js: [{ code: wrapModJs(mod) }], runAt: mod.runAt, world: mod.world === "main" ? "MAIN" : "USER_SCRIPT" });
+  }
+  return out;
+}
+
+/** Capture console output from page load on every page a JS mod runs on. */
+function captureScripts(mods) {
+  const matches = [...new Set(mods.filter((m) => !m.error && m.enabled && m.js).flatMap((m) => m.matches))];
+  if (!matches.length) return [];
+  return ["USER_SCRIPT", "MAIN"].map((world) => ({
+    id: `sm:capture:${world}`,
+    matches,
+    js: [{ code: captureCode(world) }],
+    runAt: "document_start",
+    world,
+  }));
+}
+
+async function tabsMatching(mod) {
+  try {
+    return await chrome.tabs.query({ url: mod.matches });
+  } catch {
+    return [];
+  }
+}
+
+async function syncMods(mods, changed) {
+  if (!userScriptsAvailable()) {
+    broadcastState();
+    return;
+  }
+  const existing = await chrome.userScripts.getScripts();
+  const ours = existing.filter((s) => s.id.startsWith("mod:") || s.id.startsWith("sm:")).map((s) => s.id);
+  if (ours.length) await chrome.userScripts.unregister({ ids: ours });
+
+  // Registered first so capture runs before any mod on the same page.
+  try {
+    const capture = captureScripts(mods);
+    if (capture.length) await chrome.userScripts.register(capture);
+  } catch (e) {
+    console.warn("[site-modder] console capture not registered:", e);
+  }
+
+  modErrors = {};
+  for (const mod of mods) {
+    if (mod.error) {
+      modErrors[mod.id] = mod.error;
+      continue;
+    }
+    // Register per mod so one bad match pattern doesn't block the rest.
+    const scripts = scriptsFor(mod);
+    if (!scripts.length) continue;
+    try {
+      await chrome.userScripts.register(scripts);
+    } catch (e) {
+      modErrors[mod.id] = String(e?.message ?? e);
+    }
+  }
+
+  // Apply changes to open tabs: CSS hot-swaps, anything else reloads.
+  const next = new Map(mods.map((m) => [m.id, m]));
+  const toReload = new Set();
+  const hotSwaps = [];
+  for (const id of changed) {
+    const before = lastMods.get(id);
+    const after = next.get(id);
+    const live = (m) => m && !m.error && m.enabled;
+    const cssOnly =
+      live(before) && live(after) &&
+      before.js === after.js && before.world === after.world && before.runAt === after.runAt &&
+      JSON.stringify(before.matches) === JSON.stringify(after.matches);
+    if (cssOnly) {
+      for (const tab of await tabsMatching(after)) {
+        const code = after.css ? cssCode(id, after.css) : removeCssCode(id);
+        hotSwaps.push(chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code }] }).catch(() => {}));
+      }
+    } else {
+      for (const m of [before, after]) if (m?.matches?.length) for (const t of await tabsMatching(m)) toReload.add(t.id);
+    }
+  }
+  // Resolve only once changes are visible, so the agent's next tool call
+  // (which the companion holds until this returns) sees the new page.
+  await Promise.all([...hotSwaps, ...[...toReload].map((tabId) => reloadAndWait(tabId))]);
+  lastMods = next;
+  broadcastState();
+  for (const [id, error] of Object.entries(modErrors)) {
+    if (changed.includes(id)) record({ type: "error", message: `Mod "${id}": ${error}` });
+  }
+}

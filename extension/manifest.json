@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "site-modder",
+  "version": "0.1.0",
+  "description": "Modify any website by chatting with a coding agent that runs on your machine.",
+  "minimum_chrome_version": "135",
+  "permissions": ["sidePanel", "userScripts", "tabs", "scripting", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Open site-modder" }
+}

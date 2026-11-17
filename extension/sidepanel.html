@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>site-modder</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header>
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <span id="agent">Connecting…</span>
+      </div>
+      <div class="actions">
+        <button id="stop" hidden title="Stop the agent">Stop</button>
+        <button id="new" title="Start a new conversation">New chat</button>
+      </div>
+    </header>
+    <div id="banners"></div>
+    <main id="log"></main>
+    <form id="composer">
+      <div id="page" class="page"></div>
+      <textarea id="input" rows="3" placeholder="Describe a change to this page…"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+    <script src="sidepanel.js" type="module"></script>
+  </body>
+</html>

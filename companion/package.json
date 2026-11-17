@@ -1,0 +1,28 @@
+{
+  "name": "site-modder-companion",
+  "version": "0.1.0",
+  "description": "Local companion for the site-modder Chrome extension: runs a coding agent over ACP",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "fake-extension": "tsx scripts/fake-extension.ts",
+    "test": "tsx scripts/test-match.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.108.0",
+    "@agentclientprotocol/sdk": "^2.7.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "private": true,
+  "license": "MIT"
+}
