@@ -86,6 +86,7 @@ async function onCompanionMessage(msg) {
       return;
     case "status":
       companion = { ...companion, ...msg, connected: true };
+      updateBadge();
       return broadcastState();
     case "session_update":
     case "turn_end":
@@ -106,6 +107,7 @@ function record(event) {
   transcript.push(event);
   if (transcript.length > MAX_TRANSCRIPT) transcript = transcript.slice(-MAX_TRANSCRIPT);
   for (const p of panels) p.postMessage({ type: "event", event });
+  attend(event).catch((e) => console.error("[site-modder] attention:", e));
 }
 
 function state() {
@@ -121,7 +123,10 @@ chrome.runtime.onConnect.addListener((port) => {
   panels.add(port);
   connect();
   port.postMessage({ type: "init", state: state(), transcript });
-  port.onDisconnect.addListener(() => panels.delete(port));
+  port.onDisconnect.addListener(() => {
+    panels.delete(port);
+    panelVisible.delete(port);
+  });
   port.onMessage.addListener(async (msg) => {
     switch (msg.type) {
       case "prompt": {
@@ -152,6 +157,13 @@ chrome.runtime.onConnect.addListener((port) => {
         break;
       case "set_window":
         windowId = msg.windowId;
+        break;
+      case "visibility":
+        panelVisible.set(port, msg.visible);
+        if (msg.visible) {
+          unseenTurnEnd = false;
+          updateBadge();
+        }
         break;
     }
   });
@@ -184,11 +196,10 @@ const TAB_REQUEST_TIMEOUT_MS = 90_000;
 /**
  * Ask the user (via a card in the side panel) to switch back to `tab` so it
  * can be screenshotted. Resolves true once the tab is visible: they clicked
- * "Switch to tab" or switched to it themselves. Resolves false if they decline,
- * stop the agent, no panel is open, or it times out.
+ * "Switch to tab" (in the panel or a notification) or switched to it
+ * themselves. Resolves false if they decline, stop the agent, or it times out.
  */
 function requestTabSwitch(tab) {
-  if (!panels.size) return Promise.resolve(false);
   const id = `t${++tabRequestSeq}`;
   return new Promise((resolve) => {
     const finish = async (accepted) => {
@@ -597,4 +608,144 @@ async function syncMods(mods, changed) {
   for (const [id, error] of Object.entries(modErrors)) {
     if (changed.includes(id)) record({ type: "error", message: `Mod "${id}": ${error}` });
   }
+}
+
+// ---------- attention: notifications + toolbar badge ----------
+// The agent keeps working with the side panel closed. When it finishes or
+// needs the user, and the user isn't watching the panel, notify them.
+
+const panelVisible = new Map(); // port -> whether that panel is visible
+const pendingPermissions = new Map(); // permission id -> options
+let unseenTurnEnd = false;
+let finalText = ""; // the agent's last run of text this turn, for the "done" notification
+const notificationActions = new Map(); // notification id -> (buttonIndex | null) => void
+
+async function userIsWatching() {
+  if (![...panelVisible.values()].some(Boolean)) return false;
+  const win = await chrome.windows.getLastFocused().catch(() => null);
+  return Boolean(win?.focused);
+}
+
+async function notify(id, { title, message, buttons = [], sticky = false, onAction }) {
+  if (await userIsWatching()) return;
+  notificationActions.set(id, onAction ?? (() => focusConversation()));
+  chrome.notifications.create(id, {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title,
+    message: message || " ",
+    buttons: buttons.slice(0, 2).map((t) => ({ title: t })),
+    requireInteraction: sticky,
+    priority: sticky ? 2 : 0,
+  });
+}
+
+function clearNotification(id) {
+  notificationActions.delete(id);
+  chrome.notifications.clear(id).catch(() => {});
+}
+
+/** Bring the conversation's tab forward and try to open the side panel. */
+async function focusConversation() {
+  const tab = await targetTab().catch(() => null);
+  if (!tab) return;
+  await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  // Only allowed with a user gesture; a notification click may or may not count.
+  await chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+}
+
+chrome.notifications.onClicked.addListener((id) => {
+  const action = notificationActions.get(id);
+  clearNotification(id);
+  action?.(null);
+});
+chrome.notifications.onButtonClicked.addListener((id, index) => {
+  const action = notificationActions.get(id);
+  clearNotification(id);
+  action?.(index);
+});
+chrome.notifications.onClosed.addListener((id) => notificationActions.delete(id));
+
+const clip = (s, n = 180) => {
+  const t = String(s ?? "").replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n - 1) + "…" : t;
+};
+
+async function attend(event) {
+  switch (event.type) {
+    case "user_message":
+      finalText = "";
+      unseenTurnEnd = false;
+      break;
+    case "session_update": {
+      const u = event.update;
+      if (u.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") finalText += u.content.text;
+      else if (u.sessionUpdate === "tool_call") finalText = "";
+      return;
+    }
+    case "permission_request": {
+      pendingPermissions.set(event.id, event.options);
+      const allow = event.options.find((o) => o.kind === "allow_once");
+      const reject = event.options.find((o) => o.kind === "reject_once");
+      const choices = [allow, reject].filter(Boolean);
+      await notify(`perm:${event.id}`, {
+        title: "site-modder needs your permission",
+        message: clip(event.toolCall?.title ?? "The agent wants to run a tool"),
+        buttons: choices.map((o) => o.name),
+        sticky: true,
+        onAction: (index) => {
+          if (index == null) return focusConversation();
+          send({ type: "permission_response", id: event.id, optionId: choices[index].optionId });
+        },
+      });
+      break;
+    }
+    case "permission_resolved":
+      pendingPermissions.delete(event.id);
+      clearNotification(`perm:${event.id}`);
+      break;
+    case "tab_request":
+      await notify(`tab:${event.id}`, {
+        title: "site-modder wants to see a tab",
+        message: clip(`Switch back to “${event.title || event.url}” so the agent can ${event.purpose}.`),
+        buttons: ["Switch to tab", "Not now"],
+        sticky: true,
+        onAction: (index) => tabRequests.get(event.id)?.(index !== 1),
+      });
+      break;
+    case "tab_request_resolved":
+      clearNotification(`tab:${event.id}`);
+      break;
+    case "turn_end": {
+      if (event.stopReason === "cancelled") break; // the user stopped it; they know
+      const watching = await userIsWatching();
+      unseenTurnEnd = !watching;
+      const failed = event.stopReason === "error" || event.stopReason === "refusal";
+      await notify(`done:${Date.now()}`, {
+        title: failed ? "site-modder stopped with an error" : "site-modder is done",
+        message: clip(finalText) || (failed ? "Open the side panel for details." : "The agent finished its turn."),
+      });
+      break;
+    }
+    default:
+      return;
+  }
+  updateBadge();
+}
+
+function updateBadge() {
+  let text = "";
+  let color = "#6e6e73";
+  if (pendingPermissions.size || tabRequests.size) {
+    text = "!";
+    color = "#c2410c";
+  } else if (companion.busy) {
+    text = "…";
+  } else if (unseenTurnEnd) {
+    text = "✓";
+    color = "#15803d";
+  }
+  chrome.action.setBadgeText({ text }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
 }

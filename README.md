@@ -25,6 +25,21 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ companion ⇄ ACP (stdio) ⇄ cl
 3. On site-modder's **Details** page, turn on **Allow User Scripts**. Mods need it.
 4. Click the toolbar icon to open the side panel and ask for a change.
 
+## Working in the background
+
+The agent keeps working when the side panel is closed or you switch tabs. Its
+browser tools stay on the tab you sent the message from. When you're not
+watching the panel, Chrome notifications tell you when the agent:
+
+- finishes a turn,
+- needs permission (Allow and Deny buttons are on the notification), or
+- needs you to switch back to a tab so it can take a screenshot.
+
+The toolbar badge shows the same thing at a glance: `…` while it's working,
+`!` when it needs you, and `✓` when it has finished and you haven't looked yet.
+On macOS, Chrome itself needs notification permission (System Settings →
+Notifications → Google Chrome).
+
 ## Mods
 
 Each mod is a folder in `~/.site-modder/mods/<id>/` with `mod.json`, and

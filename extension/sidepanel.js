@@ -30,7 +30,14 @@ function connectPort() {
   // The service worker can restart (e.g. extension reload); reconnect.
   port.onDisconnect.addListener(() => setTimeout(connectPort, 500));
   chrome.windows.getCurrent().then((w) => port.postMessage({ type: "set_window", windowId: w.id }));
+  reportVisibility();
 }
+
+// Lets the background skip notifications while the user is watching the panel.
+function reportVisibility() {
+  port?.postMessage({ type: "visibility", visible: document.visibilityState === "visible" });
+}
+document.addEventListener("visibilitychange", reportVisibility);
 connectPort();
 
 // ---------- header / banners ----------
