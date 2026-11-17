@@ -12,6 +12,10 @@ let ws = null;
 let companion = { connected: false, agent: null, ready: false, busy: false };
 let transcript = []; // chat events, replayed to side panels when they open
 let windowId = null; // window of the panel that sent the last prompt
+let targetTabId = null; // tab the last prompt was sent from
+let targetUrl = null; // that tab's URL when the prompt was sent
+const tabRequests = new Map(); // id -> resolve(accepted: boolean), for "switch to tab" cards
+let tabRequestSeq = 0;
 let modErrors = {}; // mod id -> registration error
 let lastMods = new Map(); // mod id -> mod, to tell CSS-only changes apart
 const panels = new Set();
@@ -123,12 +127,20 @@ chrome.runtime.onConnect.addListener((port) => {
       case "prompt": {
         windowId = msg.windowId ?? windowId;
         const tab = await activeTab().catch(() => null);
+        // Pin the agent's tools to this tab for the turn, even if the user
+        // switches tabs while it works.
+        targetTabId = tab?.id ?? null;
+        targetUrl = tab?.url ?? null;
         record({ type: "user_message", text: msg.text, url: tab?.url });
         send({ type: "prompt", text: msg.text, page: tab && { tabId: tab.id, url: tab.url, title: tab.title } });
         break;
       }
       case "cancel":
+        for (const resolve of [...tabRequests.values()]) resolve(false);
         send({ type: "cancel" });
+        break;
+      case "tab_response":
+        tabRequests.get(msg.id)?.(Boolean(msg.accept));
         break;
       case "new_session":
         transcript = [];
@@ -152,6 +164,74 @@ async function activeTab() {
   const [tab] = await chrome.tabs.query(query);
   if (!tab) throw new Error("No active tab");
   return tab;
+}
+
+/** The tab the user's latest message was sent from; browser tools act on it. */
+async function targetTab() {
+  if (targetTabId == null) return activeTab();
+  try {
+    return await chrome.tabs.get(targetTabId);
+  } catch {
+    throw new Error("The tab this conversation was working on has been closed. Ask the user to send a message from the tab they want changed.");
+  }
+}
+
+const BACKGROUND_TAB_HELP =
+  "The user has switched away from this tab and didn't switch back when asked, and Chrome can only screenshot the tab that's visible. get_page_content, query_selector_all, run_js and get_console_logs still work on this tab; use them to verify instead.";
+
+const TAB_REQUEST_TIMEOUT_MS = 90_000;
+
+/**
+ * Ask the user (via a card in the side panel) to switch back to `tab` so it
+ * can be screenshotted. Resolves true once the tab is visible: they clicked
+ * "Switch to tab" or switched to it themselves. Resolves false if they decline,
+ * stop the agent, no panel is open, or it times out.
+ */
+function requestTabSwitch(tab) {
+  if (!panels.size) return Promise.resolve(false);
+  const id = `t${++tabRequestSeq}`;
+  return new Promise((resolve) => {
+    const finish = async (accepted) => {
+      if (!tabRequests.has(id)) return;
+      tabRequests.delete(id);
+      clearTimeout(timer);
+      chrome.tabs.onActivated.removeListener(onActivated);
+      if (accepted) {
+        try {
+          await chrome.tabs.update(tab.id, { active: true });
+          await chrome.windows.update(tab.windowId, { focused: true });
+          await new Promise((r) => setTimeout(r, 400)); // let it paint
+        } catch {
+          accepted = false;
+        }
+      }
+      record({ type: "tab_request_resolved", id, accepted });
+      resolve(accepted);
+    };
+    const onActivated = (info) => info.tabId === tab.id && finish(true);
+    const timer = setTimeout(() => finish(false), TAB_REQUEST_TIMEOUT_MS);
+    chrome.tabs.onActivated.addListener(onActivated);
+    tabRequests.set(id, finish);
+    record({ type: "tab_request", id, tabId: tab.id, title: tab.title, url: tab.url, purpose: "take a screenshot" });
+  });
+}
+
+/** Origin + path, ignoring query and hash (tracking params, in-page anchors). */
+function pageKey(url) {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname;
+  } catch {
+    return url ?? "";
+  }
+}
+
+/** A note for the agent if the pinned tab has navigated since the user's message. */
+async function navigationWarning() {
+  if (targetTabId == null || !targetUrl) return undefined;
+  const tab = await chrome.tabs.get(targetTabId).catch(() => null);
+  if (!tab?.url || pageKey(tab.url) === pageKey(targetUrl)) return undefined;
+  return `Note: the user navigated this tab from ${targetUrl} to ${tab.url} since their message; this result is from the new page.`;
 }
 
 function userScriptsAvailable() {
@@ -179,13 +259,21 @@ async function blobToBase64(blob) {
 }
 
 const tools = {
-  async get_active_tab() {
-    const tab = await activeTab();
-    return { tabId: tab.id, url: tab.url, title: tab.title, status: tab.status };
+  async get_tab() {
+    const tab = await targetTab();
+    return {
+      tabId: tab.id,
+      url: tab.url,
+      title: tab.title,
+      status: tab.status,
+      urlAtMessage: targetUrl,
+      navigatedSinceMessage: targetUrl != null && pageKey(tab.url) !== pageKey(targetUrl),
+      userIsViewingIt: tab.active,
+    };
   },
 
   async get_page_content({ selector, format = "html", maxChars = 30000 }) {
-    const tab = await activeTab();
+    const tab = await targetTab();
     return inPage(
       tab.id,
       (selector, format, maxChars) => {
@@ -216,7 +304,7 @@ const tools = {
   },
 
   async query_selector_all({ selector, limit = 20 }) {
-    const tab = await activeTab();
+    const tab = await targetTab();
     return inPage(
       tab.id,
       (selector, limit) => {
@@ -247,7 +335,7 @@ const tools = {
 
   async run_js({ code, world = "isolated" }) {
     if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
-    const tab = await activeTab();
+    const tab = await targetTab();
     const [res] = await chrome.userScripts.execute({
       target: { tabId: tab.id },
       js: [{ code }],
@@ -258,7 +346,11 @@ const tools = {
   },
 
   async screenshot() {
-    const tab = await activeTab();
+    let tab = await targetTab();
+    if (!tab.active) {
+      if (!(await requestTabSwitch(tab))) throw new Error(BACKGROUND_TAB_HELP);
+      tab = await targetTab();
+    }
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     // Capture is in device pixels (2x on Retina). Scale to CSS pixels so image
     // coordinates match getBoundingClientRect, capped at the model's image size.
@@ -281,7 +373,7 @@ const tools = {
 
   async get_console_logs({ limit = 50, levels }) {
     if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
-    const tab = await activeTab();
+    const tab = await targetTab();
     const read = `(() => { const b = globalThis.__smConsole; return b ? b.slice() : null; })()`;
     const entries = [];
     let installed = false;
@@ -310,7 +402,7 @@ const tools = {
   },
 
   async reload_tab() {
-    const tab = await activeTab();
+    const tab = await targetTab();
     await reloadAndWait(tab.id);
     return "reloaded";
   },
@@ -320,9 +412,13 @@ async function runTool({ id, method, params }) {
   try {
     const fn = tools[method];
     if (!fn) throw new Error(`Unknown browser method ${method}`);
-    send({ type: "tool_result", id, result: await fn(params ?? {}) });
+    const result = await fn(params ?? {});
+    const warning = method === "apply_mods" ? undefined : await navigationWarning();
+    send({ type: "tool_result", id, result, warning });
   } catch (e) {
-    send({ type: "tool_result", id, error: String(e?.message ?? e) });
+    // Navigation often explains the failure (e.g. the tab is now on chrome://).
+    const warning = method === "apply_mods" ? undefined : await navigationWarning().catch(() => undefined);
+    send({ type: "tool_result", id, error: [warning, String(e?.message ?? e)].filter(Boolean).join("\n") });
   }
 }
 

@@ -8,12 +8,14 @@ export type FromExtension =
   | { type: "cancel" }
   | { type: "new_session" }
   | { type: "permission_response"; id: string; optionId: string | null }
-  | { type: "tool_result"; id: string; result?: unknown; error?: string };
+  | { type: "tool_result"; id: string; result?: unknown; error?: string; warning?: string };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 
+type CallOptions = { timeoutMs?: number; skipBarrier?: boolean };
+
 type Pending = {
-  resolve: (v: unknown) => void;
+  resolve: (v: { result: unknown; warning?: string }) => void;
   reject: (e: Error) => void;
   timer: NodeJS.Timeout;
 };
@@ -92,20 +94,25 @@ export class Bridge {
   }
 
   /** Ask the extension to do something in the browser and await the result. */
-  async call<T = unknown>(
+  async call<T = unknown>(method: string, params: unknown = {}, options: CallOptions = {}): Promise<T> {
+    return (await this.callWithWarning<T>(method, params, options)).result;
+  }
+
+  /** Like call(), plus any warning the extension attached (e.g. the tab navigated). */
+  async callWithWarning<T = unknown>(
     method: string,
     params: unknown = {},
-    { timeoutMs = 30_000, skipBarrier = false } = {},
-  ): Promise<T> {
+    { timeoutMs = 30_000, skipBarrier = false }: CallOptions = {},
+  ): Promise<{ result: T; warning?: string }> {
     if (!skipBarrier) await this.barrier;
     if (!this.connected) throw new Error("Extension is not connected");
     const id = `c${++this.seq}`;
-    return new Promise<T>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Browser call ${method} timed out`));
       }, timeoutMs);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
+      this.pending.set(id, { resolve: resolve as (v: { result: unknown; warning?: string }) => void, reject, timer });
       this.send({ type: "tool_call", id, method, params });
     });
   }
@@ -125,7 +132,7 @@ export class Bridge {
       this.pending.delete(msg.id);
       clearTimeout(p.timer);
       if (msg.error) p.reject(new Error(msg.error));
-      else p.resolve(msg.result);
+      else p.resolve({ result: msg.result, warning: msg.warning });
       return;
     }
     for (const l of this.listeners) l(msg);

@@ -26,7 +26,7 @@ function agentCommand(): [string, string[]] {
 }
 
 const READ_ONLY_BROWSER_TOOLS = new Set(
-  ["get_active_tab", "get_page_content", "query_selector_all", "screenshot", "get_console_logs"].map(
+  ["get_tab", "get_page_content", "query_selector_all", "screenshot", "get_console_logs"].map(
     (t) => `mcp__browser__${t}`,
   ),
 );

@@ -135,6 +135,12 @@ This directory (your working directory) holds every mod. Each mod is a folder:
 1. The user's message starts with an \`<active-tab>\` tag (URL and title) and a
    \`<mods-on-this-page>\` list of the mods whose match patterns apply to that URL.
    That list is authoritative, so don't search the mods directory to find them.
+   The browser tools act on that tab for the whole turn, even if the user switches
+   to another tab while you work. If a tool result starts with a note that the user
+   navigated the tab to another page, the result is from that new page: don't treat
+   it as evidence about the page you were working on. If the new page is one your
+   mod also applies to, you can verify there; otherwise stop checking and tell the
+   user what you couldn't verify.
    When the request is about something a listed mod does, read and edit that mod.
    Use the \`browser\`
    MCP tools (\`get_page_content\`, \`query_selector_all\`, \`screenshot\`, \`run_js\`) to

@@ -142,6 +142,17 @@ function render(e) {
       }
       break;
     }
+    case "tab_request":
+      renderTabRequest(e);
+      break;
+    case "tab_request_resolved": {
+      const el = permissionEls.get(e.id);
+      if (el) {
+        el.classList.add("resolved");
+        el.querySelector(".buttons").textContent = e.accepted ? "Switched to the tab." : "Skipped; the agent will check another way.";
+      }
+      break;
+    }
     case "error":
       breakRun();
       append(div("msg error")).textContent = e.message;
@@ -227,6 +238,24 @@ function renderPermission(e) {
     b.addEventListener("click", () => {
       port.postMessage({ type: "permission_response", id: e.id, optionId: opt.optionId });
       el.classList.add("resolved");
+      buttons.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    });
+    buttons.appendChild(b);
+  }
+}
+
+function renderTabRequest(e) {
+  breakRun();
+  const el = append(div("permission"));
+  permissionEls.set(e.id, el);
+  el.innerHTML = `<div class="title">The agent wants to see “${esc(e.title || e.url)}” to ${esc(e.purpose)}.</div><div class="buttons"></div>`;
+  const buttons = el.querySelector(".buttons");
+  for (const [label, accept] of [["Switch to tab", true], ["Not now", false]]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (accept) b.className = "primary";
+    b.addEventListener("click", () => {
+      port.postMessage({ type: "tab_response", id: e.id, accept });
       buttons.querySelectorAll("button").forEach((x) => (x.disabled = true));
     });
     buttons.appendChild(b);
