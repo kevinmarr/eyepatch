@@ -293,6 +293,19 @@ function userScriptsAvailable() {
   }
 }
 
+// Chrome has no event for the "Allow User Scripts" toggle, so check while a
+// side panel is open (that's where the banner asking for it is shown).
+let userScriptsOn = userScriptsAvailable();
+function checkUserScripts() {
+  const on = userScriptsAvailable();
+  if (on === userScriptsOn) return;
+  userScriptsOn = on;
+  broadcastState();
+  // Just turned on: have Agent Bridge send the mods again so they get registered.
+  if (on) send({ type: "sync_mods" });
+}
+setInterval(() => panels.size && checkUserScripts(), 1000);
+
 const USER_SCRIPTS_HELP =
   'User scripts are disabled. Open chrome://extensions, click "Details" on site-modder and turn on "Allow User Scripts".';
 

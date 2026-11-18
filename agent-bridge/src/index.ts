@@ -28,6 +28,10 @@ function pushMods(changed: string[] = []) {
 }
 
 extension.onConnect(() => pushMods());
+// User scripts were just allowed: register every mod and reload the tabs it applies to.
+extension.on((msg) => {
+  if (msg.type === "sync_mods") void loadMods().then((mods) => pushMods(mods.map((m) => m.id)));
+});
 watchMods((ids) => {
   console.log(`[mods] changed: ${ids.join(", ")}`);
   pushMods(ids);

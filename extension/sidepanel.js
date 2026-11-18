@@ -45,13 +45,12 @@ connectPort();
 function setState(s) {
   state = s;
   const c = s.bridge;
-  const who = accountLabel(s.auth);
   const current = s.agents?.list.find((a) => a.id === s.agents.selected);
   const hasAgent = c.connected && !c.needsAgent && (c.agent || current);
   $("agent").hidden = !hasAgent;
   if (hasAgent) {
     const icon = current?.icon ? `<img class="agent-icon" src="${esc(current.icon)}" alt="" />` : "";
-    $("agent").innerHTML = icon + esc(c.agent ?? current.name) + (who ? ` <span class="who">· ${esc(who)}</span>` : "");
+    $("agent").innerHTML = icon + esc(c.agent ?? current.name);
   }
   $("stop").hidden = !c.busy;
   $("new").hidden = !hasAgent;
@@ -302,12 +301,6 @@ let forcedSignInStarted = false;
 let signinKey = null; // what the sign-in card was last built for
 
 const needsSignIn = (auth) => auth?.state === "unauthenticated";
-
-function accountLabel(auth) {
-  if (auth?.state !== "authenticated") return "";
-  const a = auth.accounts.find((x) => x.active) ?? auth.accounts[0];
-  return a ? a.email || a.name || a.label : "";
-}
 
 function renderAuth(auth, c) {
   const picking = renderAgents(state.agents, c);

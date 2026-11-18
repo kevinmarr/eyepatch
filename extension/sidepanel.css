@@ -144,7 +144,6 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .agent-btn:hover { border-color: var(--border); }
 .agent-icon { width: 16px; height: 16px; }
 @media (prefers-color-scheme: dark) { .agent-icon { filter: invert(1); } }
-.agent-btn .who { font-weight: 400; color: var(--muted); }
 
 .account {
   margin: 8px 12px 0;

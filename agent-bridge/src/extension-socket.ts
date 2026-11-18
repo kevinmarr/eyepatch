@@ -15,7 +15,8 @@ export type FromExtension =
   | { type: "auth_logout" }
   | { type: "auth_recheck" }
   | { type: "agent_select"; id: string }
-  | { type: "agents_refresh" };
+  | { type: "agents_refresh" }
+  | { type: "sync_mods" };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 
