@@ -8,7 +8,12 @@ export type FromExtension =
   | { type: "cancel" }
   | { type: "new_session" }
   | { type: "permission_response"; id: string; optionId: string | null }
-  | { type: "tool_result"; id: string; result?: unknown; error?: string; warning?: string };
+  | { type: "tool_result"; id: string; result?: unknown; error?: string; warning?: string }
+  | { type: "auth_start"; methodId: string }
+  | { type: "auth_input"; text: string }
+  | { type: "auth_cancel" }
+  | { type: "auth_logout" }
+  | { type: "auth_set_api_key"; key: string | null };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 

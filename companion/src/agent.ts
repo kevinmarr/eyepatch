@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk/unstable";
+import { AUTH_REQUIRED, AuthManager } from "./auth.js";
 import type { Bridge, FromExtension, PageInfo } from "./bridge.js";
 import { createBrowserTools } from "./browser-tools.js";
 import { MODS_DIR } from "./config.js";
@@ -14,7 +15,7 @@ import { loadMods, type Mod } from "./mods.js";
  * through the official ACP adapter. Override with e.g.
  * SITE_MODDER_AGENT="gemini --experimental-acp".
  */
-function agentCommand(): [string, string[]] {
+export function agentCommand(): [string, string[]] {
   const custom = process.env.SITE_MODDER_AGENT?.trim();
   if (custom) {
     const [cmd, ...args] = custom.split(/\s+/);
@@ -77,22 +78,44 @@ export class AgentHost {
   private pendingPermissions = new Map<string, (optionId: string | null) => void>();
   private readonly mcp = new acp.McpOverAcpProvider();
   private readonly tools: ReturnType<typeof createBrowserTools>;
+  private readonly auth: AuthManager;
 
   constructor(private readonly bridge: Bridge) {
     this.tools = createBrowserTools(bridge);
+    this.auth = new AuthManager({
+      send: (msg) => bridge.send(msg),
+      conn: () => this.conn,
+      agentCommand,
+      restartAgent: () => this.restart(),
+    });
     bridge.on((msg) => this.onExtensionMessage(msg));
-    bridge.onConnect(() => this.sendStatus());
+    bridge.onConnect(() => {
+      this.sendStatus();
+      this.auth.send();
+    });
+  }
+
+  /** Stop the agent process and start a fresh one (new credentials or env). */
+  async restart() {
+    const old = this.child;
+    this.child = undefined; // so its exit handler doesn't schedule another restart
+    this.conn?.close();
+    this.reset();
+    old?.kill();
+    await this.start().catch((e) => console.error("[agent] restart failed:", e));
   }
 
   async start() {
     const [cmd, args] = agentCommand();
+    const secretEnv = await this.auth.loadSecrets();
     console.log(`[agent] starting: ${path.basename(cmd)} ${args.join(" ")}`);
     const child = spawn(cmd, args, {
       cwd: MODS_DIR,
       stdio: ["pipe", "pipe", "inherit"],
       // Claude Code defers MCP tools behind a ToolSearch step by default; our
       // browser tools are used in nearly every turn, so load them upfront.
-      env: { ENABLE_TOOL_SEARCH: "false", ...process.env },
+      // API keys entered in the panel come last so they win.
+      env: { ENABLE_TOOL_SEARCH: "false", ...process.env, ...secretEnv },
     });
     this.child = child;
     child.on("exit", (code, signal) => {
@@ -118,13 +141,21 @@ export class AgentHost {
       .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) =>
         this.requestPermission(params, signal),
       )
-      .onRequest(acp.methods.client.mcp.message, this.mcp.handleRequest);
+      .onRequest(acp.methods.client.mcp.message, this.mcp.handleRequest)
+      .onNotification(acp.methods.client.auth.statusUpdate, ({ params }) => this.auth.onStatusUpdate(params));
 
     this.conn = app.connect(stream);
 
     const init = await this.conn.agent.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+        // We can run "terminal" sign-in methods (output and input relayed to
+        // the side panel). The _meta flag is the older form some agents use.
+        auth: { terminal: true },
+        _meta: { "terminal-auth": true },
+      },
       clientInfo: { name: "site-modder", version: "0.1.0" },
     });
     this.agentName = init.agentInfo?.title ?? init.agentInfo?.name ?? "agent";
@@ -136,6 +167,7 @@ export class AgentHost {
       name: "browser",
       handler: this.tools.handler,
     });
+    this.auth.onInitialized(init);
     this.ready = true;
     console.log(`[agent] ready: ${this.agentName} (protocol v${init.protocolVersion})`);
     this.sendStatus();
@@ -177,6 +209,22 @@ export class AgentHost {
         break;
       case "hello":
         this.sendStatus();
+        this.auth.send();
+        break;
+      case "auth_start":
+        void this.auth.start(msg.methodId);
+        break;
+      case "auth_input":
+        this.auth.input(msg.text);
+        break;
+      case "auth_cancel":
+        this.auth.cancel();
+        break;
+      case "auth_logout":
+        void this.newSession().then(() => this.auth.logout());
+        break;
+      case "auth_set_api_key":
+        void this.auth.setApiKey(msg.key);
         break;
     }
   }
@@ -211,6 +259,10 @@ export class AgentHost {
       this.bridge.send({ type: "error", message: "Agent is busy; stop it or wait for it to finish" });
       return;
     }
+    if (this.auth.needsSignIn) {
+      this.bridge.send({ type: "error", message: `Sign in to ${this.agentName} first.` });
+      return;
+    }
     this.busy = true;
     this.sendStatus();
     try {
@@ -224,7 +276,12 @@ export class AgentHost {
       this.bridge.send({ type: "turn_end", stopReason: res.stopReason });
     } catch (e) {
       console.error("[agent] prompt failed:", e);
-      this.bridge.send({ type: "error", message: String((e as Error).message ?? e) });
+      const authRequired = (e as { code?: number }).code === AUTH_REQUIRED;
+      if (authRequired) this.auth.markAuthRequired();
+      this.bridge.send({
+        type: "error",
+        message: authRequired ? `Sign in to ${this.agentName} to continue.` : String((e as Error).message ?? e),
+      });
       this.bridge.send({ type: "turn_end", stopReason: "error" });
     } finally {
       this.busy = false;

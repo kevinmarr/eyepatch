@@ -10,14 +10,16 @@
     <header>
       <div class="status">
         <span id="dot" class="dot"></span>
-        <span id="agent">Connecting…</span>
+        <button id="agent" class="agent-btn" type="button" aria-expanded="false" aria-controls="account">Connecting…</button>
       </div>
       <div class="actions">
         <button id="stop" hidden title="Stop the agent">Stop</button>
         <button id="new" title="Start a new conversation">New chat</button>
       </div>
     </header>
+    <section id="account" class="account" hidden></section>
     <div id="banners"></div>
+    <section id="signin" class="signin" hidden></section>
     <main id="log"></main>
     <form id="composer">
       <div id="page" class="page"></div>

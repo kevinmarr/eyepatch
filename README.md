@@ -25,6 +25,25 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ companion ⇄ ACP (stdio) ⇄ cl
 3. On site-modder's **Details** page, turn on **Allow User Scripts**. Mods need it.
 4. Click the toolbar icon to open the side panel and ask for a change.
 
+## Signing in
+
+The side panel signs the agent in using whatever the agent offers over ACP,
+so it works for any ACP agent, not just Claude:
+
+- **Sign-in methods the agent lists.** Some it runs itself. Others are commands
+  the companion runs, relaying the output (with clickable links) and a box to
+  paste a code back. For Claude these are "Claude Subscription" and
+  "Anthropic Console".
+- **API key**, for agents whose key variable site-modder knows
+  (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`). It's saved to
+  `~/.site-modder/secrets.json` (readable only by you) and passed to the agent
+  when it starts.
+- **Status and sign-out.** Click the agent's name in the header to see the
+  signed-in account, sign in another way, or sign out. Signing out signs the
+  agent out on this computer, which can include using it outside site-modder.
+
+If you're already signed in to Claude Code, there's nothing to do.
+
 ## Working in the background
 
 The agent keeps working when the side panel is closed or you switch tabs. Its

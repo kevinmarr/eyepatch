@@ -10,6 +10,7 @@ const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model A
 
 let ws = null;
 let companion = { connected: false, agent: null, ready: false, busy: false };
+let auth = null; // agent sign-in state, from the companion
 let transcript = []; // chat events, replayed to side panels when they open
 let windowId = null; // window of the panel that sent the last prompt
 let targetTabId = null; // tab the last prompt was sent from
@@ -55,6 +56,7 @@ async function connect() {
     ws = null;
     declineTabRequests("the companion disconnected");
     companion = { connected: false, agent: null, ready: false, busy: false };
+    auth = null;
     broadcastState();
     setTimeout(connect, 2000);
   };
@@ -97,6 +99,9 @@ async function onCompanionMessage(msg) {
       return record(msg);
     case "tool_call":
       return runTool(msg);
+    case "auth":
+      auth = msg.auth;
+      return broadcastState();
     case "reload_extension":
       return chrome.runtime.reload();
   }
@@ -112,7 +117,7 @@ function record(event) {
 }
 
 function state() {
-  return { companion, userScripts: userScriptsAvailable(), modErrors };
+  return { companion, auth, userScripts: userScriptsAvailable(), modErrors };
 }
 
 function broadcastState() {
@@ -144,6 +149,13 @@ chrome.runtime.onConnect.addListener((port) => {
       case "cancel":
         declineTabRequests("the user stopped the agent");
         send({ type: "cancel" });
+        break;
+      case "auth_start":
+      case "auth_input":
+      case "auth_cancel":
+      case "auth_logout":
+      case "auth_set_api_key":
+        send(msg);
         break;
       case "tab_response":
         tabRequests.get(msg.id)?.(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });

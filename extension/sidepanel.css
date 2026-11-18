@@ -112,7 +112,7 @@ details.thought div { white-space: pre-wrap; padding-left: 12px; }
 .permission .buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .permission.resolved { border-color: var(--border); opacity: 0.7; }
 
-form {
+#composer {
   border-top: 1px solid var(--border);
   padding: 8px 12px 12px;
   display: grid;
@@ -131,3 +131,74 @@ textarea {
 }
 textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 #send { align-self: end; }
+
+/* ---------- account + sign-in ---------- */
+.agent-btn {
+  font: inherit;
+  font-weight: 600;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 1px solid transparent;
+  background: none;
+}
+.agent-btn:hover { border-color: var(--border); }
+.agent-btn .who { font-weight: 400; color: var(--muted); }
+
+.account {
+  margin: 8px 12px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.account .row { display: flex; gap: 6px; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+body.signing-in main,
+body.signing-in form#composer { display: none; }
+.signin {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.signin h2 { font-size: 16px; margin: 0; }
+.signin p { margin: 0; }
+.signin .method {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.signin .method small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.signin .method strong { font-weight: 600; }
+.signin form { display: flex; gap: 6px; }
+.signin input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.signin .output {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.signin .error { color: var(--err); }
+.signin details summary { cursor: pointer; color: var(--muted); }
+.signin details[open] summary { margin-bottom: 8px; }
+
+[hidden] { display: none !important; }
