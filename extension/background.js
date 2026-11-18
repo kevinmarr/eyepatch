@@ -1,16 +1,18 @@
-// site-modder service worker: owns the WebSocket to the local companion,
+// site-modder service worker: owns the WebSocket to Agent Bridge (the local
+// program that runs the agent),
 // runs browser tools for the agent, registers mods as user scripts, and
-// relays chat between the companion and any open side panels.
+// relays chat between Agent Bridge and any open side panels.
 
-const COMPANION_PORT = 7457;
-const COMPANION_URL = `ws://127.0.0.1:${COMPANION_PORT}`;
-const PROBE_URL = `http://127.0.0.1:${COMPANION_PORT}/`;
+const BRIDGE_PORT = 7457;
+const BRIDGE_URL = `ws://127.0.0.1:${BRIDGE_PORT}`;
+const PROBE_URL = `http://127.0.0.1:${BRIDGE_PORT}/`;
 const MAX_TRANSCRIPT = 2000;
 const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model API anyway
 
 let ws = null;
-let companion = { connected: false, agent: null, ready: false, busy: false };
-let auth = null; // agent sign-in state, from the companion
+let bridge = { connected: false, agent: null, ready: false, busy: false };
+let auth = null; // agent sign-in state, from Agent Bridge
+let agents = null; // agent catalog, selection and install progress, from Agent Bridge
 let transcript = []; // chat events, replayed to side panels when they open
 let windowId = null; // window of the panel that sent the last prompt
 let targetTabId = null; // tab the last prompt was sent from
@@ -23,7 +25,7 @@ const panels = new Set();
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
-// ---------- companion connection ----------
+// ---------- bridge connection ----------
 
 let probing = false;
 
@@ -32,31 +34,32 @@ async function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
   // Chrome logs every refused WebSocket as an extension error, so check with a
   // plain fetch first and only open the socket once something is listening.
-  // (The companion answers non-upgrade HTTP requests with 426; any response is fine.)
+  // (Agent Bridge answers non-upgrade HTTP requests with 426; any response is fine.)
   probing = true;
   try {
     await fetch(PROBE_URL, { cache: "no-store" });
   } catch {
-    // Companion not running. Retry fast while a panel is open; otherwise the alarm retries.
+    // Agent Bridge not running. Retry fast while a panel is open; otherwise the alarm retries.
     if (panels.size) setTimeout(connect, 2000);
     return;
   } finally {
     probing = false;
   }
   if (ws) return;
-  const socket = new WebSocket(COMPANION_URL);
+  const socket = new WebSocket(BRIDGE_URL);
   ws = socket;
   socket.onopen = () => {
-    companion = { ...companion, connected: true };
+    bridge = { ...bridge, connected: true };
     send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version });
     broadcastState();
   };
   socket.onclose = () => {
     if (ws !== socket) return;
     ws = null;
-    declineTabRequests("the companion disconnected");
-    companion = { connected: false, agent: null, ready: false, busy: false };
+    declineTabRequests("Agent Bridge disconnected");
+    bridge = { connected: false, agent: null, ready: false, busy: false };
     auth = null;
+    agents = null;
     broadcastState();
     setTimeout(connect, 2000);
   };
@@ -68,7 +71,7 @@ async function connect() {
     } catch {
       return;
     }
-    onCompanionMessage(msg).catch((e) => console.error("[site-modder]", e));
+    onBridgeMessage(msg).catch((e) => console.error("[site-modder]", e));
   };
 }
 
@@ -83,12 +86,12 @@ chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(connect);
 connect();
 
-async function onCompanionMessage(msg) {
+async function onBridgeMessage(msg) {
   switch (msg.type) {
     case "ping":
       return;
     case "status":
-      companion = { ...companion, ...msg, connected: true };
+      bridge = { ...bridge, ...msg, connected: true };
       updateBadge();
       return broadcastState();
     case "session_update":
@@ -102,6 +105,12 @@ async function onCompanionMessage(msg) {
     case "auth":
       auth = msg.auth;
       return broadcastState();
+    case "agents":
+      agents = msg.agents;
+      return broadcastState();
+    case "agent_changed":
+      // A different agent doesn't share the old one's conversation.
+      return clearTranscript();
     case "reload_extension":
       return chrome.runtime.reload();
   }
@@ -117,7 +126,12 @@ function record(event) {
 }
 
 function state() {
-  return { companion, auth, userScripts: userScriptsAvailable(), modErrors };
+  return { bridge, auth, agents, userScripts: userScriptsAvailable(), modErrors };
+}
+
+function clearTranscript() {
+  transcript = [];
+  for (const p of panels) p.postMessage({ type: "init", state: state(), transcript });
 }
 
 function broadcastState() {
@@ -155,15 +169,16 @@ chrome.runtime.onConnect.addListener((port) => {
       case "auth_cancel":
       case "auth_logout":
       case "auth_recheck":
+      case "agent_select":
+      case "agents_refresh":
         send(msg);
         break;
       case "tab_response":
         tabRequests.get(msg.id)?.(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
         break;
       case "new_session":
-        transcript = [];
         send({ type: "new_session" });
-        for (const p of panels) p.postMessage({ type: "init", state: state(), transcript });
+        clearTranscript();
         break;
       case "permission_response":
         send({ type: "permission_response", id: msg.id, optionId: msg.optionId });
@@ -246,7 +261,7 @@ function requestTabSwitch(tab) {
   });
 }
 
-/** Resolve every open tab request as declined (agent stopped, companion gone). */
+/** Resolve every open tab request as declined (agent stopped, Agent Bridge gone). */
 function declineTabRequests(reason) {
   for (const finish of [...tabRequests.values()]) finish({ accepted: false, reason });
 }
@@ -626,7 +641,7 @@ async function syncMods(mods, changed) {
     }
   }
   // Resolve only once changes are visible, so the agent's next tool call
-  // (which the companion holds until this returns) sees the new page.
+  // (which Agent Bridge holds until this returns) sees the new page.
   await Promise.all([...hotSwaps, ...[...toReload].map((tabId) => reloadAndWait(tabId))]);
   lastMods = next;
   broadcastState();
@@ -768,7 +783,7 @@ function updateBadge() {
   if (pendingPermissions.size || tabRequests.size) {
     text = "!";
     color = "#c2410c";
-  } else if (companion.busy) {
+  } else if (bridge.busy) {
     text = "…";
   } else if (unseenTurnEnd) {
     text = "✓";

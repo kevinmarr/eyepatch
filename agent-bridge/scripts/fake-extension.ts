@@ -1,6 +1,7 @@
-// Headless stand-in for the Chrome extension, for testing the companion:
+// Headless stand-in for the Chrome extension, for testing Agent Bridge:
 //   npm start                      (in one terminal)
 //   npm run fake-extension -- "make the page background red"
+// FAKE_AGENT=<registry id> picks (and installs) that agent first.
 // Answers browser tool calls with canned data for https://example.com and
 // auto-approves permission requests.
 import { WebSocket } from "ws";
@@ -28,16 +29,41 @@ const tools: Record<string, (p: any) => unknown> = {
 };
 
 let prompted = false;
+let selecting = false;
+let selected: string | null = null;
+let restarting = false; // switched agents; waiting for the new one to come up
+let lastReady = false;
+function maybePrompt() {
+  if (prompted || !lastReady || restarting || (process.env.FAKE_AGENT && selected !== process.env.FAKE_AGENT)) return;
+  prompted = true;
+  console.log(`> ${prompt}\n`);
+  ws.send(JSON.stringify({ type: "prompt", text: prompt, page }));
+}
 let pageCalls = 0;
 ws.on("message", (data) => {
   const msg = JSON.parse(String(data));
   switch (msg.type) {
-    case "status":
-      if (msg.ready && !prompted) {
-        prompted = true;
-        console.log(`> ${prompt}\n`);
-        ws.send(JSON.stringify({ type: "prompt", text: prompt, page }));
+    case "agents": {
+      const a = msg.agents;
+      const ins = a.installing;
+      if (ins) process.stdout.write(`\r[agents] ${ins.phase} ${ins.id} ${ins.version} ${ins.received ? Math.round(ins.received / 1e6) + " MB" : ""} ${ins.detail ?? ""}`.slice(0, 160).padEnd(80));
+      else if (a.installError) console.error(`\n[agents] install failed: ${a.installError.message}`);
+      else console.log(`\n[agents] selected=${a.selected} (${a.list.length} in catalog)`);
+      selected = a.selected;
+      if (process.env.FAKE_AGENT && a.selected !== process.env.FAKE_AGENT && !ins && !a.installError && !selecting) {
+        selecting = true;
+        restarting = true;
+        ws.send(JSON.stringify({ type: "agent_select", id: process.env.FAKE_AGENT }));
       }
+      if (a.installError) process.exit(1);
+      maybePrompt();
+      break;
+    }
+    case "status":
+      if (msg.needsAgent && !process.env.FAKE_AGENT) console.log("[status] no agent chosen; set FAKE_AGENT=claude-acp");
+      if (!msg.ready && selected === process.env.FAKE_AGENT) restarting = false;
+      lastReady = msg.ready;
+      maybePrompt();
       break;
     case "session_update": {
       const u = msg.update;
@@ -72,6 +98,6 @@ ws.on("message", (data) => {
   }
 });
 ws.on("error", (e) => {
-  console.error("Could not connect to the companion:", e.message);
+  console.error("Could not connect to Agent Bridge:", e.message);
   process.exit(1);
 });

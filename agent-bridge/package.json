@@ -1,7 +1,7 @@
 {
-  "name": "site-modder-companion",
+  "name": "site-modder-agent-bridge",
   "version": "0.1.0",
-  "description": "Local companion for the site-modder Chrome extension: runs a coding agent over ACP",
+  "description": "Agent Bridge for the site-modder Chrome extension: runs a coding agent over ACP",
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
@@ -11,7 +11,6 @@
   },
   "type": "module",
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.108.0",
     "@agentclientprotocol/sdk": "^2.7.0",
     "@modelcontextprotocol/server": "^2.4.0",
     "ws": "^8.23.0",

@@ -1,30 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk/unstable";
+import type { AgentManager } from "./agents.js";
 import { AUTH_REQUIRED, AuthManager } from "./auth.js";
-import type { Bridge, FromExtension, PageInfo } from "./bridge.js";
+import type { ExtensionSocket, FromExtension, PageInfo } from "./extension-socket.js";
 import { createBrowserTools } from "./browser-tools.js";
 import { MODS_DIR } from "./config.js";
 import { modApplies } from "./match.js";
 import { loadMods, type Mod } from "./mods.js";
-
-/**
- * The agent command. Any ACP agent works; by default we run Claude Code
- * through the official ACP adapter. Override with e.g.
- * SITE_MODDER_AGENT="gemini --experimental-acp".
- */
-export function agentCommand(): [string, string[]] {
-  const custom = process.env.SITE_MODDER_AGENT?.trim();
-  if (custom) {
-    const [cmd, ...args] = custom.split(/\s+/);
-    return [cmd, args];
-  }
-  const require = createRequire(import.meta.url);
-  const pkg = require.resolve("@agentclientprotocol/claude-agent-acp/package.json");
-  return [process.execPath, [path.join(path.dirname(pkg), "dist/index.js")]];
-}
 
 const READ_ONLY_BROWSER_TOOLS = new Set(
   ["get_tab", "get_page_content", "query_selector_all", "screenshot", "get_console_logs"].map(
@@ -70,7 +54,7 @@ export class AgentHost {
   private conn?: acp.ClientConnection;
   private browserServer?: acp.McpServerRegistration;
   private supportsAcpMcp = false;
-  private agentName = "agent";
+  private agentName: string | null = null;
   private ready = false;
   private sessionId?: string;
   private busy = false;
@@ -80,20 +64,38 @@ export class AgentHost {
   private readonly tools: ReturnType<typeof createBrowserTools>;
   private readonly auth: AuthManager;
 
-  constructor(private readonly bridge: Bridge) {
-    this.tools = createBrowserTools(bridge);
+  constructor(
+    private readonly extension: ExtensionSocket,
+    private readonly agents: AgentManager,
+  ) {
+    this.tools = createBrowserTools(extension);
     this.auth = new AuthManager({
-      send: (msg) => bridge.send(msg),
+      send: (msg) => extension.send(msg),
       conn: () => this.conn,
-      agentCommand,
+      launchSpec: () => agents.launchSpec(),
       restartAgent: () => this.restart(),
     });
-    bridge.on((msg) => this.onExtensionMessage(msg));
-    bridge.onConnect(() => {
+    extension.on((msg) => this.onExtensionMessage(msg));
+    extension.onConnect(() => {
       this.sendStatus();
       this.auth.send();
+      agents.sendView();
+    });
+    agents.onChange((reason) => {
+      if (reason === "selected") {
+        // A different agent: start over with a fresh conversation.
+        this.extension.send({ type: "agent_changed" });
+        void this.restart();
+      } else if (!this.busy) {
+        void this.restart(); // a newer copy of the same agent
+      } else {
+        this.restartWhenIdle = true;
+      }
     });
   }
+
+  private restartWhenIdle = false;
+  private quickExits = 0;
 
   /** Stop the agent process and start a fresh one (new credentials or env). */
   async restart() {
@@ -106,22 +108,39 @@ export class AgentHost {
   }
 
   async start() {
-    const [cmd, args] = agentCommand();
+    this.restartWhenIdle = false;
+    const spec = this.agents.launchSpec();
+    if (!spec) {
+      console.log("[agent] no agent chosen yet; pick one in the side panel");
+      this.agentName = null;
+      this.sendStatus();
+      return;
+    }
+    void this.agents.pruneOldVersions();
+    const { cmd, args } = spec;
     console.log(`[agent] starting: ${path.basename(cmd)} ${args.join(" ")}`);
     const child = spawn(cmd, args, {
       cwd: MODS_DIR,
       stdio: ["pipe", "pipe", "inherit"],
       // Claude Code defers MCP tools behind a ToolSearch step by default; our
       // browser tools are used in nearly every turn, so load them upfront.
-      env: { ENABLE_TOOL_SEARCH: "false", ...process.env },
+      env: { ENABLE_TOOL_SEARCH: "false", ...process.env, ...spec.env },
     });
     this.child = child;
+    child.on("error", (e) => console.error(`[agent] couldn't start ${cmd}: ${e.message}`));
+    const startedAt = Date.now();
     child.on("exit", (code, signal) => {
       if (this.child !== child) return;
-      console.error(`[agent] exited (${signal ?? code}); restarting in 2s`);
+      // Back off if it keeps dying right away (broken install, bad config).
+      this.quickExits = Date.now() - startedAt < 15_000 ? this.quickExits + 1 : 0;
+      const delay = Math.min(2000 * 2 ** this.quickExits, 60_000);
+      console.error(`[agent] exited (${signal ?? code}); restarting in ${delay / 1000}s`);
+      this.child = undefined;
       this.conn?.close();
       this.reset();
-      setTimeout(() => this.start().catch((e) => console.error("[agent] restart failed:", e)), 2000);
+      setTimeout(() => {
+        if (!this.child) this.start().catch((e) => console.error("[agent] restart failed:", e));
+      }, delay);
     });
 
     const stream = acp.ndJsonStream(
@@ -133,7 +152,7 @@ export class AgentHost {
       .client({ name: "site-modder" })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         if (params.sessionId === this.sessionId) {
-          this.bridge.send({ type: "session_update", update: params.update });
+          this.extension.send({ type: "session_update", update: params.update });
         }
       })
       .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) =>
@@ -181,9 +200,11 @@ export class AgentHost {
   }
 
   private sendStatus() {
-    this.bridge.send({
+    this.extension.send({
       type: "status",
       agent: this.agentName,
+      needsAgent: !this.agents.launchSpec(),
+      browserTools: this.supportsAcpMcp,
       ready: this.ready,
       busy: this.busy,
       sessionId: this.sessionId ?? null,
@@ -226,6 +247,12 @@ export class AgentHost {
       case "auth_logout":
         void this.newSession().then(() => this.auth.logout());
         break;
+      case "agent_select":
+        if (!this.busy) void this.agents.select(msg.id);
+        break;
+      case "agents_refresh":
+        void this.agents.refresh();
+        break;
     }
   }
 
@@ -252,15 +279,15 @@ export class AgentHost {
 
   private async prompt(text: string, page?: PageInfo) {
     if (!this.ready || !this.conn) {
-      this.bridge.send({ type: "error", message: "Agent is not ready yet" });
+      this.extension.send({ type: "error", message: "The agent is still starting. Try again in a moment." });
       return;
     }
     if (this.busy) {
-      this.bridge.send({ type: "error", message: "Agent is busy; stop it or wait for it to finish" });
+      this.extension.send({ type: "error", message: "Agent is busy; stop it or wait for it to finish" });
       return;
     }
     if (this.auth.needsSignIn) {
-      this.bridge.send({ type: "error", message: `Sign in to ${this.agentName} first.` });
+      this.extension.send({ type: "error", message: `Sign in to ${this.agentName} first.` });
       return;
     }
     this.busy = true;
@@ -273,19 +300,21 @@ export class AgentHost {
         sessionId,
         prompt: [{ type: "text", text: context + text }],
       });
-      this.bridge.send({ type: "turn_end", stopReason: res.stopReason });
+      this.extension.send({ type: "turn_end", stopReason: res.stopReason });
     } catch (e) {
       console.error("[agent] prompt failed:", e);
       const authRequired = (e as { code?: number }).code === AUTH_REQUIRED;
       if (authRequired) this.auth.markAuthRequired();
-      this.bridge.send({
+      this.extension.send({
         type: "error",
         message: authRequired ? `Sign in to ${this.agentName} to continue.` : String((e as Error).message ?? e),
       });
-      this.bridge.send({ type: "turn_end", stopReason: "error" });
+      this.extension.send({ type: "turn_end", stopReason: "error" });
     } finally {
       this.busy = false;
       this.sendStatus();
+      this.auth.refreshIfUnknown();
+      if (this.restartWhenIdle) void this.restart();
     }
   }
 
@@ -306,7 +335,7 @@ export class AgentHost {
     params: acp.RequestPermissionRequest,
     signal: AbortSignal,
   ): Promise<acp.RequestPermissionResponse> {
-    if (!this.bridge.connected) return Promise.resolve({ outcome: { outcome: "cancelled" } });
+    if (!this.extension.connected) return Promise.resolve({ outcome: { outcome: "cancelled" } });
     // Read-only browser tools don't need a prompt. run_js and reload_tab still ask.
     if (READ_ONLY_BROWSER_TOOLS.has(params.toolCall.title ?? "")) {
       const allow = params.options.find((o) => o.kind === "allow_once");
@@ -316,7 +345,7 @@ export class AgentHost {
     return new Promise((resolve) => {
       const done = (optionId: string | null) => {
         this.pendingPermissions.delete(id);
-        this.bridge.send({ type: "permission_resolved", id });
+        this.extension.send({ type: "permission_resolved", id });
         resolve(
           optionId
             ? { outcome: { outcome: "selected", optionId } }
@@ -325,7 +354,7 @@ export class AgentHost {
       };
       this.pendingPermissions.set(id, done);
       signal.addEventListener("abort", () => done(null), { once: true });
-      this.bridge.send({
+      this.extension.send({
         type: "permission_request",
         id,
         toolCall: params.toolCall,

@@ -1,17 +1,20 @@
 import { AgentHost } from "./agent.js";
-import { Bridge } from "./bridge.js";
+import { AgentManager } from "./agents.js";
+import { ExtensionSocket } from "./extension-socket.js";
 import { EXTENSION_DIR, MODS_DIR, PORT } from "./config.js";
 import { ensureModsDir, loadMods, watchDir, watchMods } from "./mods.js";
 
 await ensureModsDir();
 
-const bridge = new Bridge(PORT);
-const agent = new AgentHost(bridge);
+const extension = new ExtensionSocket(PORT);
+const agents = new AgentManager((msg) => extension.send(msg));
+await agents.init();
+const agent = new AgentHost(extension, agents);
 
 async function applyMods(changed: string[]) {
   const mods = await loadMods();
-  if (!bridge.connected) return;
-  const { errors } = await bridge.call<{ errors: Record<string, string> }>(
+  if (!extension.connected) return;
+  const { errors } = await extension.call<{ errors: Record<string, string> }>(
     "apply_mods",
     { mods, changed },
     { timeoutMs: 45_000, skipBarrier: true },
@@ -21,10 +24,10 @@ async function applyMods(changed: string[]) {
 
 function pushMods(changed: string[] = []) {
   const work = applyMods(changed).catch((e) => console.error("[mods] apply failed:", e.message ?? e));
-  bridge.holdCallsUntil(work);
+  extension.holdCallsUntil(work);
 }
 
-bridge.onConnect(() => pushMods());
+extension.onConnect(() => pushMods());
 watchMods((ids) => {
   console.log(`[mods] changed: ${ids.join(", ")}`);
   pushMods(ids);
@@ -33,10 +36,10 @@ watchMods((ids) => {
 // Dev loop for the extension itself: edit a file in extension/ and it reloads.
 watchDir(EXTENSION_DIR, () => {
   console.log("[dev] extension files changed; reloading extension");
-  bridge.send({ type: "reload_extension" });
+  extension.send({ type: "reload_extension" });
 });
 
-console.log(`site-modder companion
+console.log(`site-modder Agent Bridge
   websocket  ws://127.0.0.1:${PORT}
   mods       ${MODS_DIR}
   extension  ${EXTENSION_DIR} (auto-reload on change)`);

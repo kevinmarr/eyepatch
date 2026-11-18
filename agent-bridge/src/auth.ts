@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import * as acp from "@agentclientprotocol/sdk/unstable";
+import type { LaunchSpec } from "./agents.js";
 import { MODS_DIR } from "./config.js";
 
 /**
@@ -39,7 +40,7 @@ function isTerminal(m: acp.AuthMethod) {
 type Deps = {
   send: (msg: Record<string, unknown>) => void;
   conn: () => acp.ClientConnection | undefined;
-  agentCommand: () => [string, string[]];
+  launchSpec: () => LaunchSpec | undefined;
   /** Restart the agent process so it picks up new credentials or env. */
   restartAgent: () => Promise<void>;
 };
@@ -64,7 +65,7 @@ export class AuthManager {
     this.caps = init.agentCapabilities?.auth;
     this.state = "unknown";
     this.accounts = [];
-    void this.refresh();
+    void this.refresh().then(() => setTimeout(() => this.refreshIfUnknown(), 10_000));
   }
 
   onStatusUpdate(params: acp.AuthStatusUpdateNotification) {
@@ -76,6 +77,11 @@ export class AuthManager {
   markAuthRequired() {
     this.state = "unauthenticated";
     this.send();
+  }
+
+  /** Claude's status check can time out while it starts; ask again later. */
+  refreshIfUnknown() {
+    if (this.state === "unknown") void this.refresh();
   }
 
   get needsSignIn() {
@@ -140,12 +146,14 @@ export class AuthManager {
   /** Run a "terminal" method's command, relaying its output to the panel. */
   private runTerminal(method: acp.AuthMethod) {
     const meta = terminalMeta(method);
-    const [agentCmd, agentArgs] = this.deps.agentCommand();
+    const spec = this.deps.launchSpec();
+    if (!spec) return this.fail("No agent is selected");
     const [cmd, args] = meta?.command
       ? [meta.command, meta.args ?? []]
-      : [agentCmd, [...agentArgs, ...(("args" in method && method.args) || [])]];
+      : [spec.cmd, [...spec.args, ...(("args" in method && method.args) || [])]];
     const env = {
       ...process.env,
+      ...spec.env,
       ...(("env" in method && method.env) || {}),
       ...(meta?.env ?? {}),
     };

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { fromMcpServer } from "@agentclientprotocol/sdk/experimental/mcp-server";
 import * as z from "zod";
-import type { Bridge } from "./bridge.js";
+import type { ExtensionSocket } from "./extension-socket.js";
 
 type Screenshot = {
   base64: string;
@@ -40,14 +40,14 @@ type Content = ToolResult["content"];
  * (such as "the user navigated this tab") so the agent can't miss it.
  */
 async function browser<T>(
-  bridge: Bridge,
+  extension: ExtensionSocket,
   method: string,
   args: unknown = {},
   render: (result: T) => Content = (r) => text(r).content,
   timeoutMs?: number,
 ): Promise<ToolResult> {
   return guarded(async () => {
-    const { result, warning } = await bridge.callWithWarning<T>(method, args, { timeoutMs });
+    const { result, warning } = await extension.callWithWarning<T>(method, args, { timeoutMs });
     const content = render(result);
     return { content: warning ? [{ type: "text", text: warning }, ...content] : content };
   });
@@ -59,7 +59,7 @@ async function browser<T>(
  * against the tab the user's latest message was sent from (even if they've
  * since switched tabs).
  */
-export function createBrowserTools(bridge: Bridge) {
+export function createBrowserTools(extension: ExtensionSocket) {
   return fromMcpServer(() => {
     const server = new McpServer({ name: "browser", version: "0.1.0" });
 
@@ -70,7 +70,7 @@ export function createBrowserTools(bridge: Bridge) {
           "Get the tab you're working on (the one the user's latest message was sent from): id, current URL and title, the URL when the message was sent, whether it has navigated since, and whether the user is still viewing it.",
         inputSchema: z.object({}),
       },
-      () => browser(bridge, "get_tab"),
+      () => browser(extension, "get_tab"),
     );
 
     server.registerTool(
@@ -84,7 +84,7 @@ export function createBrowserTools(bridge: Bridge) {
           maxChars: z.number().int().positive().max(200_000).default(30_000),
         }),
       },
-      (args) => browser(bridge, "get_page_content", args),
+      (args) => browser(extension, "get_page_content", args),
     );
 
     server.registerTool(
@@ -97,7 +97,7 @@ export function createBrowserTools(bridge: Bridge) {
           limit: z.number().int().positive().max(200).default(20),
         }),
       },
-      (args) => browser(bridge, "query_selector_all", args),
+      (args) => browser(extension, "query_selector_all", args),
     );
 
     server.registerTool(
@@ -110,7 +110,7 @@ export function createBrowserTools(bridge: Bridge) {
           world: z.enum(["isolated", "main"]).default("isolated"),
         }),
       },
-      (args) => browser(bridge, "run_js", args),
+      (args) => browser(extension, "run_js", args),
     );
 
     server.registerTool(
@@ -122,7 +122,7 @@ export function createBrowserTools(bridge: Bridge) {
       },
       () =>
         browser<Screenshot>(
-          bridge,
+          extension,
           "screenshot",
           {},
           (shot) => {
@@ -154,7 +154,7 @@ export function createBrowserTools(bridge: Bridge) {
             .describe("Only these levels (default: all)"),
         }),
       },
-      (args) => browser(bridge, "get_console_logs", args),
+      (args) => browser(extension, "get_console_logs", args),
     );
 
     server.registerTool(
@@ -163,7 +163,7 @@ export function createBrowserTools(bridge: Bridge) {
         description: "Reload the tab (e.g. to see a JS mod run from a clean page).",
         inputSchema: z.object({}),
       },
-      () => browser(bridge, "reload_tab"),
+      () => browser(extension, "reload_tab"),
     );
 
     return server;

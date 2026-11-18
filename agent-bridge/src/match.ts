@@ -1,6 +1,6 @@
 /**
  * Chrome extension match patterns (https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns),
- * so the companion can tell which mods apply to a URL exactly as Chrome will.
+ * so Agent Bridge can tell which mods apply to a URL exactly as Chrome will.
  */
 
 const SCHEMES = new Set(["http", "https", "file", "ftp", "ws", "wss"]);

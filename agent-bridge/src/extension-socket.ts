@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { EXTENSION_ID } from "./config.js";
 
-/** Messages the extension sends to the companion. */
+/** Messages the extension sends to Agent Bridge. */
 export type FromExtension =
   | { type: "hello"; extensionVersion?: string }
   | { type: "prompt"; text: string; page?: PageInfo }
@@ -13,7 +13,9 @@ export type FromExtension =
   | { type: "auth_input"; text: string }
   | { type: "auth_cancel" }
   | { type: "auth_logout" }
-  | { type: "auth_recheck" };
+  | { type: "auth_recheck" }
+  | { type: "agent_select"; id: string }
+  | { type: "agents_refresh" };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 
@@ -26,10 +28,10 @@ type Pending = {
 };
 
 /**
- * WebSocket bridge to the extension's service worker. Only one extension
+ * WebSocket to the extension's service worker. Only one extension
  * connection is active at a time; a new one replaces the old.
  */
-export class Bridge {
+export class ExtensionSocket {
   private wss: WebSocketServer;
   private socket: WebSocket | null = null;
   private pending = new Map<string, Pending>();
@@ -50,7 +52,7 @@ export class Bridge {
     });
 
     this.wss.on("connection", (ws, req) => {
-      console.log(`[bridge] extension connected (${req.headers.origin})`);
+      console.log(`[extension] connected (${req.headers.origin})`);
       this.socket?.close(1000, "replaced");
       this.socket = ws;
       ws.on("message", (data) => {
@@ -64,7 +66,7 @@ export class Bridge {
       });
       ws.on("close", () => {
         if (this.socket !== ws) return;
-        console.log("[bridge] extension disconnected");
+        console.log("[extension] disconnected");
         this.socket = null;
         for (const [id, p] of this.pending) {
           clearTimeout(p.timer);

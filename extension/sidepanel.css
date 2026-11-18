@@ -45,12 +45,7 @@ header {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
-.status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
-.dot.ready { background: var(--ok); }
-.dot.busy { background: var(--warn); animation: pulse 1s infinite alternate; }
-@keyframes pulse { to { opacity: 0.3; } }
-.actions { display: flex; gap: 6px; }
+.actions { display: flex; gap: 6px; margin-left: auto; }
 
 button {
   font: inherit;
@@ -66,13 +61,15 @@ button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 8px 12px 0;
   padding: 8px 10px;
   border-radius: 6px;
   background: var(--panel);
-  border-left: 3px solid var(--warn);
 }
-.banner code { user-select: all; }
+.banner button { margin-left: auto; flex: none; }
 
 main {
   flex: 1;
@@ -134,6 +131,9 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 /* ---------- account + sign-in ---------- */
 .agent-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font: inherit;
   font-weight: 600;
   padding: 2px 6px;
@@ -142,6 +142,8 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   background: none;
 }
 .agent-btn:hover { border-color: var(--border); }
+.agent-icon { width: 16px; height: 16px; }
+@media (prefers-color-scheme: dark) { .agent-icon { filter: invert(1); } }
 .agent-btn .who { font-weight: 400; color: var(--muted); }
 
 .account {
@@ -200,5 +202,25 @@ body.signing-in form#composer { display: none; }
 .signin .error { color: var(--err); }
 .signin details summary { cursor: pointer; color: var(--muted); }
 .signin details[open] summary { margin-bottom: 8px; }
+
+/* ---------- agent picker ---------- */
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.agent-card img, .agent-card .noicon { width: 24px; height: 24px; flex: none; }
+@media (prefers-color-scheme: dark) { .agent-card img { filter: invert(1); } }
+.agent-card .text { flex: 1; min-width: 0; }
+.agent-card .text strong { display: block; }
+.agent-card .tag { flex: none; font-size: 11px; color: var(--muted); }
+.agent-card.current { border-color: var(--accent); }
+.agent-card.current .tag { color: var(--accent); }
+.agent-list { display: flex; flex-direction: column; gap: 6px; }
+progress { width: 100%; accent-color: var(--accent); }
 
 [hidden] { display: none !important; }

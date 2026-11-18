@@ -44,35 +44,53 @@ connectPort();
 
 function setState(s) {
   state = s;
-  const c = s.companion;
-  const dot = $("dot");
-  dot.className = "dot" + (c.busy ? " busy" : c.ready ? " ready" : "");
+  const c = s.bridge;
   const who = accountLabel(s.auth);
-  $("agent").innerHTML = !c.connected
-    ? "Companion offline"
-    : c.ready
-      ? esc(c.agent ?? "Agent") + (who ? ` <span class="who">· ${esc(who)}</span>` : "")
-      : "Starting agent…";
+  const current = s.agents?.list.find((a) => a.id === s.agents.selected);
+  const hasAgent = c.connected && !c.needsAgent && (c.agent || current);
+  $("agent").hidden = !hasAgent;
+  if (hasAgent) {
+    const icon = current?.icon ? `<img class="agent-icon" src="${esc(current.icon)}" alt="" />` : "";
+    $("agent").innerHTML = icon + esc(c.agent ?? current.name) + (who ? ` <span class="who">· ${esc(who)}</span>` : "");
+  }
   $("stop").hidden = !c.busy;
+  $("new").hidden = !hasAgent;
   $("send").disabled = !c.ready || c.busy || needsSignIn(s.auth);
   renderAuth(s.auth, c);
 
   const banners = [];
   if (!c.connected) {
+    banners.push(`Can't reach Agent Bridge. Make sure it's running.`);
+  }
+  if (c.ready && c.browserTools === false) {
     banners.push(
-      `Start the local companion: <code>cd site-modder/companion && npm start</code>`,
+      `${esc(c.agent)} can't see web pages, only their address.<button type="button" data-action="change-agent">Change agent</button>`,
     );
   }
   if (!s.userScripts) {
     banners.push(
-      `Mods can't run yet. In <code>chrome://extensions</code>, open site-modder's <b>Details</b> and turn on <b>Allow User Scripts</b>.`,
+      `Turn on <b>Allow User Scripts</b> so mods can run.<button type="button" data-action="open-settings">Open settings</button>`,
     );
   }
   for (const [id, err] of Object.entries(s.modErrors ?? {})) {
     banners.push(`Mod <b>${esc(id)}</b> isn't running: ${esc(err)}`);
   }
-  $("banners").innerHTML = banners.map((b) => `<div class="banner">${b}</div>`).join("");
+  $("banners").innerHTML = banners
+    .map((b) => {
+      const [text, button = ""] = b.split(/(?=<button)/);
+      return `<div class="banner"><span>${text}</span>${button}</div>`;
+    })
+    .join("");
 }
+
+$("banners").addEventListener("click", (e) => {
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "open-settings") chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+  if (action === "change-agent") {
+    chooseAgent = true;
+    setState(state);
+  }
+});
 
 async function updatePage() {
   const w = await chrome.windows.getCurrent();
@@ -87,7 +105,7 @@ updatePage();
 
 function submit() {
   const text = input.value.trim();
-  if (!text || !state?.companion.ready || state.companion.busy) return;
+  if (!text || !state?.bridge.ready || state.bridge.busy) return;
   chrome.windows.getCurrent().then((w) => port.postMessage({ type: "prompt", text, windowId: w.id }));
   input.value = "";
 }
@@ -292,13 +310,14 @@ function accountLabel(auth) {
 }
 
 function renderAuth(auth, c) {
+  const picking = renderAgents(state.agents, c);
   // Leave "sign in another way" once a sign-in started from it has finished.
   if (forceSignIn && auth?.signIn) forcedSignInStarted = true;
   if (forceSignIn && forcedSignInStarted && !auth?.signIn && auth?.state === "authenticated") {
     forceSignIn = forcedSignInStarted = false;
   }
-  const showSignin = Boolean(c.connected && auth && (needsSignIn(auth) || auth.signIn || forceSignIn));
-  document.body.classList.toggle("signing-in", showSignin);
+  const showSignin = !picking && Boolean(c.connected && !c.needsAgent && auth && (needsSignIn(auth) || auth.signIn || forceSignIn));
+  document.body.classList.toggle("signing-in", showSignin || picking);
   $("signin").hidden = !showSignin;
   if (showSignin) renderSignin(auth);
   else signinKey = null;
@@ -322,7 +341,7 @@ function renderSignin(auth) {
     const terminal = auth.methods.find((m) => m.id === auth.signIn.methodId)?.kind === "terminal";
     parts.push(
       `<p><strong>Signing in with ${esc(auth.signIn.name)}…</strong></p>`,
-      `<p class="muted">Finish in the browser window that opened. If it doesn't open, use the link below. If you're shown a code, paste it here.</p>`,
+      `<p class="muted">Finish signing in in your browser. If you're shown a code, paste it here.</p>`,
     );
     if (terminal) {
       parts.push(
@@ -335,7 +354,7 @@ function renderSignin(auth) {
     parts.push(
       forceSignIn
         ? `<p class="muted">Sign ${agent} in with one of its options below.</p>`
-        : `<p class="muted">${agent} isn't signed in. Sign in the way you normally do (for example in your terminal) and check again, or use one of ${agent}'s options below.</p>`,
+        : `<p class="muted">${agent} isn't signed in.</p>`,
       `<div><button id="auth-recheck" type="button">Check again</button></div>`,
     );
     for (const m of auth.methods) {
@@ -408,14 +427,18 @@ function renderAccount(auth, c) {
     if (!auth.accounts.length) lines.push(`<div>Signed in to ${esc(auth.agent)}.</div>`);
   } else if (auth.state === "not_required") {
     lines.push(`<div>${esc(auth.agent)} doesn't need signing in.</div>`);
-  } else {
-    lines.push(`<div class="muted">${esc(auth.agent)} hasn't said whether it's signed in.</div>`);
   }
   const buttons = [];
+  if (state.agents && !state.agents.custom) buttons.push(`<button id="acct-agent" type="button">Change agent</button>`);
   if (auth.methods.length) buttons.push(`<button id="acct-switch" type="button">Sign in another way</button>`);
   if (auth.canLogout && auth.state === "authenticated") buttons.push(`<button id="acct-logout" type="button">Sign out</button>`);
   if (buttons.length) lines.push(`<div class="row">${buttons.join("")}</div>`);
   el.innerHTML = lines.join("");
+  el.querySelector("#acct-agent")?.addEventListener("click", () => {
+    chooseAgent = true;
+    accountOpen = false;
+    setState(state);
+  });
   el.querySelector("#acct-switch")?.addEventListener("click", () => {
     forceSignIn = true;
     accountOpen = false;
@@ -423,12 +446,100 @@ function renderAccount(auth, c) {
   });
   el.querySelector("#acct-logout")?.addEventListener("click", () => {
     const ok = confirm(
-      `Sign out of ${auth.agent}?\n\nThis signs the agent out on this computer, which can include using it outside site-modder (for example in a terminal).`,
+      `Sign out of ${auth.agent}?\n\nThis also signs you out of ${auth.agent} outside site-modder.`,
     );
     if (!ok) return;
     accountOpen = false;
     port.postMessage({ type: "auth_logout" });
   });
+}
+
+// ---------- agent picker ----------
+
+let chooseAgent = false; // user chose "Change agent"
+let pickedId = null; // what they clicked, until it's installed and selected
+let moreOpen = false;
+
+function fmtMB(n) {
+  return `${Math.round(n / 1e6)} MB`;
+}
+
+/** Shows the picker when no agent is chosen (or the user asked to change). Returns whether it's showing. */
+function renderAgents(agents, c) {
+  const el = $("agents");
+  if (agents && pickedId && agents.selected === pickedId && !agents.installing) {
+    chooseAgent = false; // the choice went through
+    pickedId = null;
+  }
+  if (agents?.installError) pickedId = null;
+  const installingChoice = agents?.installing && !agents.installing.update;
+  const show = Boolean(c.connected && agents && !agents.custom && (!agents.selected || chooseAgent || installingChoice));
+  el.hidden = !show;
+  if (!show) return false;
+
+  const parts = [
+    `<h2>${agents.selected ? "Change agent" : "Choose a coding agent"}</h2>`,
+  ];
+  const ins = agents.installing;
+  if (ins && !ins.update) {
+    const pct = ins.total ? Math.round((100 * ins.received) / ins.total) : null;
+    const what = {
+      downloading: `Downloading ${esc(ins.name)}${ins.received ? ` (${fmtMB(ins.received)}${ins.total ? ` of ${fmtMB(ins.total)}` : ""})` : ""}…`,
+      verifying: `Checking the download…`,
+      extracting: `Unpacking…`,
+      npm: `Installing ${esc(ins.name)}…`,
+    }[ins.phase];
+    parts.push(
+      `<div><p><strong>${what}</strong></p><progress ${pct != null && ins.phase === "downloading" ? `value="${pct}" max="100"` : ""}></progress>${ins.detail ? `<p class="muted small">${esc(ins.detail)}</p>` : ""}</div>`,
+    );
+  }
+  if (agents.installError) {
+    const name = agents.list.find((a) => a.id === agents.installError.id)?.name ?? agents.installError.id;
+    parts.push(`<p class="error">Couldn't install ${esc(name)}: ${esc(agents.installError.message)}</p>`);
+  }
+  if (agents.registryError) {
+    parts.push(`<p class="error">${esc(agents.registryError)}</p><div><button id="agents-retry" type="button">Try again</button></div>`);
+  }
+
+  const card = (a) => {
+    const current = a.id === agents.selected;
+    const tag = current
+      ? "In use"
+      : a.unavailable
+        ? ""
+        : a.installedVersion
+          ? "Installed"
+          : "Install";
+    const disabled = Boolean(a.unavailable || ins || current);
+    const icon = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
+    return `<button class="agent-card${current ? " current" : ""}" type="button" data-agent="${esc(a.id)}" ${disabled ? "disabled" : ""}>${icon}<span class="text"><strong>${esc(a.name)}</strong></span><span class="tag">${tag}</span></button>`;
+  };
+  // Agents that can't be installed on this computer aren't worth listing.
+  const installable = agents.list.filter((a) => !a.unavailable || a.id === agents.selected);
+  const featured = installable.filter((a) => a.featured || a.id === agents.selected);
+  const rest = installable.filter((a) => !featured.includes(a));
+  parts.push(`<div class="agent-list">${featured.map(card).join("")}</div>`);
+  if (rest.length) {
+    parts.push(`<details id="agents-more" ${moreOpen ? "open" : ""}><summary>More agents (${rest.length})</summary><div class="agent-list">${rest.map(card).join("")}</div></details>`);
+  }
+  if (agents.selected && !ins) parts.push(`<div><button id="agents-back" type="button">Back</button></div>`);
+
+  const scroll = el.scrollTop;
+  el.innerHTML = parts.join("");
+  el.scrollTop = scroll;
+  el.querySelectorAll("[data-agent]").forEach((b) =>
+    b.addEventListener("click", () => {
+      pickedId = b.dataset.agent;
+      port.postMessage({ type: "agent_select", id: b.dataset.agent });
+    }),
+  );
+  el.querySelector("#agents-more")?.addEventListener("toggle", (e) => (moreOpen = e.target.open));
+  el.querySelector("#agents-retry")?.addEventListener("click", () => port.postMessage({ type: "agents_refresh" }));
+  el.querySelector("#agents-back")?.addEventListener("click", () => {
+    chooseAgent = false;
+    setState(state);
+  });
+  return true;
 }
 
 // ---------- tiny, escape-first markdown ----------
