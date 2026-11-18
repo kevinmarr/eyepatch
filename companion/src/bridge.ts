@@ -13,7 +13,7 @@ export type FromExtension =
   | { type: "auth_input"; text: string }
   | { type: "auth_cancel" }
   | { type: "auth_logout" }
-  | { type: "auth_set_api_key"; key: string | null };
+  | { type: "auth_recheck" };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 

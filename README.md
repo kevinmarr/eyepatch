@@ -27,22 +27,22 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ companion ⇄ ACP (stdio) ⇄ cl
 
 ## Signing in
 
-The side panel signs the agent in using whatever the agent offers over ACP,
-so it works for any ACP agent, not just Claude:
+site-modder uses your agent's existing sign-in; it doesn't manage credentials.
+If you're already signed in to Claude Code, there's nothing to do.
 
-- **Sign-in methods the agent lists.** Some it runs itself. Others are commands
+If the agent reports it's signed out, the side panel says so and offers:
+
+- **Check again**, after you've signed in the way you normally do (for
+  example in your terminal).
+- **The agent's own sign-in options**, listed by the agent over ACP, so this
+  works for any ACP agent. Some the agent runs itself. Others are commands
   the companion runs, relaying the output (with clickable links) and a box to
   paste a code back. For Claude these are "Claude Subscription" and
   "Anthropic Console".
-- **API key**, for agents whose key variable site-modder knows
-  (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`). It's saved to
-  `~/.site-modder/secrets.json` (readable only by you) and passed to the agent
-  when it starts.
-- **Status and sign-out.** Click the agent's name in the header to see the
-  signed-in account, sign in another way, or sign out. Signing out signs the
-  agent out on this computer, which can include using it outside site-modder.
 
-If you're already signed in to Claude Code, there's nothing to do.
+Click the agent's name in the header to see the signed-in account, sign in
+another way, or sign out. Signing out signs the agent out on this computer,
+which can include using it outside site-modder.
 
 ## Working in the background
 

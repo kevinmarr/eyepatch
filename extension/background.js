@@ -154,7 +154,7 @@ chrome.runtime.onConnect.addListener((port) => {
       case "auth_input":
       case "auth_cancel":
       case "auth_logout":
-      case "auth_set_api_key":
+      case "auth_recheck":
         send(msg);
         break;
       case "tab_response":

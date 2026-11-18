@@ -107,15 +107,13 @@ export class AgentHost {
 
   async start() {
     const [cmd, args] = agentCommand();
-    const secretEnv = await this.auth.loadSecrets();
     console.log(`[agent] starting: ${path.basename(cmd)} ${args.join(" ")}`);
     const child = spawn(cmd, args, {
       cwd: MODS_DIR,
       stdio: ["pipe", "pipe", "inherit"],
       // Claude Code defers MCP tools behind a ToolSearch step by default; our
       // browser tools are used in nearly every turn, so load them upfront.
-      // API keys entered in the panel come last so they win.
-      env: { ENABLE_TOOL_SEARCH: "false", ...process.env, ...secretEnv },
+      env: { ENABLE_TOOL_SEARCH: "false", ...process.env },
     });
     this.child = child;
     child.on("exit", (code, signal) => {
@@ -220,11 +218,13 @@ export class AgentHost {
       case "auth_cancel":
         this.auth.cancel();
         break;
+      case "auth_recheck":
+        // The user may have signed in outside site-modder; a fresh agent
+        // process re-reads its credentials and reports status again.
+        if (!this.busy) void this.restart();
+        break;
       case "auth_logout":
         void this.newSession().then(() => this.auth.logout());
-        break;
-      case "auth_set_api_key":
-        void this.auth.setApiKey(msg.key);
         break;
     }
   }

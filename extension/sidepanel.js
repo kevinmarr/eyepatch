@@ -307,7 +307,7 @@ function renderAuth(auth, c) {
 
 function renderSignin(auth) {
   const el = $("signin");
-  const key = JSON.stringify([auth.signIn?.methodId, auth.methods, auth.apiKey, auth.error, auth.state, forceSignIn]);
+  const key = JSON.stringify([auth.signIn?.methodId, auth.methods, auth.error, auth.state, forceSignIn]);
   if (key === signinKey) {
     // Only the command output changed; don't rebuild (keeps typed input and focus).
     const out = el.querySelector(".output");
@@ -332,21 +332,19 @@ function renderSignin(auth) {
     }
     parts.push(`<div><button id="auth-cancel" type="button">Cancel</button></div>`);
   } else {
-    parts.push(`<p class="muted">site-modder runs ${agent} on your computer. Choose how it should sign in.</p>`);
+    parts.push(
+      forceSignIn
+        ? `<p class="muted">Sign ${agent} in with one of its options below.</p>`
+        : `<p class="muted">${agent} isn't signed in. Sign in the way you normally do (for example in your terminal) and check again, or use one of ${agent}'s options below.</p>`,
+      `<div><button id="auth-recheck" type="button">Check again</button></div>`,
+    );
     for (const m of auth.methods) {
       parts.push(
         `<button class="method" type="button" data-method="${esc(m.id)}"><strong>${esc(m.name)}</strong>${m.description ? `<small>${esc(m.description)}</small>` : ""}</button>`,
       );
     }
-    if (auth.apiKey) {
-      parts.push(
-        `<details ${auth.methods.length ? "" : "open"}><summary>Use an API key</summary>` +
-          `<form id="auth-key"><input name="key" type="password" autocomplete="off" placeholder="${esc(auth.apiKey.envVar)}" aria-label="API key" /><button type="submit">Save</button></form>` +
-          `<p class="muted small" style="margin-top:6px">Saved on this computer in ~/.site-modder/secrets.json and passed to ${agent} as ${esc(auth.apiKey.envVar)}.</p></details>`,
-      );
-    }
-    if (!auth.methods.length && !auth.apiKey) {
-      parts.push(`<p>${agent} didn't offer a way to sign in from here. Sign in with its own tools, then restart the companion.</p>`);
+    if (!auth.methods.length) {
+      parts.push(`<p>${agent} doesn't offer a way to sign in from here; use its own tools.</p>`);
     }
     if (forceSignIn) parts.push(`<div><button id="auth-back" type="button">Back</button></div>`);
   }
@@ -370,13 +368,10 @@ function renderSignin(auth) {
     port.postMessage({ type: "auth_input", text: input.value.trim() });
     input.value = "";
   });
-  el.querySelector("#auth-key")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const input = e.target.elements.key;
-    if (!input.value.trim()) return;
-    port.postMessage({ type: "auth_set_api_key", key: input.value.trim() });
-    input.value = "";
-    forceSignIn = false;
+  el.querySelector("#auth-recheck")?.addEventListener("click", (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Checking…";
+    port.postMessage({ type: "auth_recheck" });
   });
   el.querySelector("#auth-input input")?.focus();
 }
@@ -416,10 +411,8 @@ function renderAccount(auth, c) {
   } else {
     lines.push(`<div class="muted">${esc(auth.agent)} hasn't said whether it's signed in.</div>`);
   }
-  if (auth.apiKey?.set) lines.push(`<div class="muted small">Using the API key you saved (${esc(auth.apiKey.envVar)}).</div>`);
   const buttons = [];
-  if (auth.methods.length || auth.apiKey) buttons.push(`<button id="acct-switch" type="button">Sign in another way</button>`);
-  if (auth.apiKey?.set) buttons.push(`<button id="acct-remove-key" type="button">Remove API key</button>`);
+  if (auth.methods.length) buttons.push(`<button id="acct-switch" type="button">Sign in another way</button>`);
   if (auth.canLogout && auth.state === "authenticated") buttons.push(`<button id="acct-logout" type="button">Sign out</button>`);
   if (buttons.length) lines.push(`<div class="row">${buttons.join("")}</div>`);
   el.innerHTML = lines.join("");
@@ -427,9 +420,6 @@ function renderAccount(auth, c) {
     forceSignIn = true;
     accountOpen = false;
     setState(state);
-  });
-  el.querySelector("#acct-remove-key")?.addEventListener("click", () => {
-    port.postMessage({ type: "auth_set_api_key", key: null });
   });
   el.querySelector("#acct-logout")?.addEventListener("click", () => {
     const ok = confirm(
