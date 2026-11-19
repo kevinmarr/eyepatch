@@ -71,7 +71,11 @@ OpenCode) support it.
 Only tested with the fake extension (`npm run fake-extension`), a mock-up of
 the side panel, or not at all:
 
-- Switching tabs while the agent works (since the tab-pinning fix).
+- Per-tab side panels (only tested with Chrome's API mocked): the panel hides
+  on other tabs and comes back with its chat; several tabs chatting at once;
+  per-tab badges; notifications naming the tab; clicking a notification opens
+  that tab's panel.
+- Switching tabs while the agent works.
 - Notifications, including their Allow/Deny and Switch/Not now buttons.
 - A complete real sign-in and sign-out, and signing in to agents other than
   Claude.
@@ -86,6 +90,13 @@ the side panel, or not at all:
 - Store listing, screenshots, privacy disclosures, and justifications for the
   `userScripts`, `<all_urls>` and (after section 1) `nativeMessaging`
   permissions.
+
+## Session history
+
+Chats are saved to `~/.site-modder/sessions/<session id>.json` (agent, title,
+URL, events). Add a history menu to the side panel that lists them and restores
+one into the current tab, using ACP `session/load` or `session/resume` where
+the agent supports them (Claude Agent does) so the agent remembers it too.
 
 ## Later
 

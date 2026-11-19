@@ -1,7 +1,7 @@
 // site-modder service worker: owns the WebSocket to Agent Bridge (the local
-// program that runs the agent),
-// runs browser tools for the agent, registers mods as user scripts, and
-// relays chat between Agent Bridge and any open side panels.
+// program that runs the agents), runs browser tools for them, registers mods
+// as user scripts, and relays each tab's chat between Agent Bridge and that
+// tab's side panel. Every tab has its own side panel and its own chat.
 
 const BRIDGE_PORT = 7457;
 const BRIDGE_URL = `ws://127.0.0.1:${BRIDGE_PORT}`;
@@ -10,23 +10,45 @@ const MAX_TRANSCRIPT = 2000;
 const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model API anyway
 
 let ws = null;
-let bridge = { connected: false, agent: null, ready: false, busy: false };
-let auth = null; // agent sign-in state, from Agent Bridge
-let model = null; // the agent's model choice ({ current, options }), if it has one
-let agents = null; // agent catalog, selection and install progress, from Agent Bridge
-let transcript = []; // chat events, replayed to side panels when they open
-let windowId = null; // window of the panel that sent the last prompt
-let targetTabId = null; // tab the last prompt was sent from
-let targetUrl = null; // that tab's URL when the prompt was sent
-const tabRequests = new Map(); // id -> resolve(accepted: boolean), for "switch to tab" cards
+let connected = false;
+let agents = null; // agent catalog and install progress, from Agent Bridge
+const auths = new Map(); // agent id -> sign-in state
+const chats = new Map(); // tab id -> { agentId, agent, ready, busy, browserTools, model, ... }
+const transcripts = new Map(); // tab id -> chat events, replayed when its panel opens
+const urlAtMessage = new Map(); // tab id -> the tab's URL when its latest message was sent
+const tabRequests = new Map(); // id -> { tabId, event, finish }, for "switch to tab" cards
 let tabRequestSeq = 0;
 let modErrors = {}; // mod id -> registration error
 let lastMods = new Map(); // mod id -> mod, to tell CSS-only changes apart
-const panels = new Set();
+const panels = new Map(); // tab id -> Set of ports (that tab's side panel)
 
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// ---------- one side panel per tab ----------
 
-// ---------- bridge connection ----------
+// No panel by default; the toolbar button turns one on for the current tab.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+chrome.sidePanel.setOptions({ enabled: false }).catch(() => {});
+
+chrome.action.onClicked.addListener((tab) => {
+  // Both calls must happen synchronously in the click for open() to be allowed.
+  chrome.sidePanel.setOptions({ tabId: tab.id, path: `sidepanel.html?tab=${tab.id}`, enabled: true });
+  chrome.sidePanel.open({ tabId: tab.id }).catch((e) => console.warn("[site-modder] open panel:", e));
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  send({ type: "close_chat", tabId });
+  for (const [id, r] of tabRequests) if (r.tabId === tabId) r.finish({ accepted: false, reason: "the tab was closed" });
+  chats.delete(tabId);
+  transcripts.delete(tabId);
+  urlAtMessage.delete(tabId);
+  attention.delete(tabId);
+});
+
+// Chrome clears a tab's badge when it navigates; put it back.
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === "loading" && attention.has(tabId)) updateBadge(tabId);
+});
+
+// ---------- Agent Bridge connection ----------
 
 let probing = false;
 
@@ -49,19 +71,22 @@ async function connect() {
   if (ws) return;
   const socket = new WebSocket(BRIDGE_URL);
   ws = socket;
-  socket.onopen = () => {
-    bridge = { ...bridge, connected: true };
-    send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version });
+  socket.onopen = async () => {
+    connected = true;
+    const tabs = (await chrome.tabs.query({}).catch(() => [])).map((t) => t.id);
+    send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version, tabs });
+    // Panels that are already open get their chat back.
+    for (const tabId of panels.keys()) send({ type: "open_chat", tabId });
     broadcastState();
   };
   socket.onclose = () => {
     if (ws !== socket) return;
     ws = null;
+    connected = false;
     declineTabRequests("Agent Bridge disconnected");
-    bridge = { connected: false, agent: null, ready: false, busy: false };
-    auth = null;
     agents = null;
-    model = null;
+    auths.clear();
+    for (const c of chats.values()) Object.assign(c, { ready: false, busy: false });
     broadcastState();
     setTimeout(connect, 2000);
   };
@@ -92,30 +117,31 @@ async function onBridgeMessage(msg) {
   switch (msg.type) {
     case "ping":
       return;
-    case "status":
-      bridge = { ...bridge, ...msg, connected: true };
-      updateBadge();
-      return broadcastState();
+    case "chat":
+      chats.set(msg.tabId, msg.chat);
+      updateBadge(msg.tabId);
+      return broadcastState(msg.tabId);
+    case "transcript":
+      transcripts.set(msg.tabId, msg.events);
+      for (const [id, r] of tabRequests) if (r.tabId === msg.tabId) transcripts.get(msg.tabId).push(r.event);
+      return initPanels(msg.tabId);
     case "session_update":
     case "turn_end":
     case "error":
+    case "user_message":
     case "permission_request":
-    case "permission_resolved":
-      return record(msg);
+    case "permission_resolved": {
+      const { tabId, ...event } = msg;
+      return record(tabId, event);
+    }
     case "tool_call":
       return runTool(msg);
     case "auth":
-      auth = msg.auth;
+      auths.set(msg.agentId, msg.auth);
       return broadcastState();
     case "agents":
       agents = msg.agents;
       return broadcastState();
-    case "model":
-      model = msg.model ?? null;
-      return broadcastState();
-    case "agent_changed":
-      // A different agent doesn't share the old one's conversation.
-      return clearTranscript();
     case "reload_extension":
       return chrome.runtime.reload();
   }
@@ -123,80 +149,108 @@ async function onBridgeMessage(msg) {
 
 // ---------- side panels ----------
 
-function record(event) {
-  transcript.push(event);
-  if (transcript.length > MAX_TRANSCRIPT) transcript = transcript.slice(-MAX_TRANSCRIPT);
-  for (const p of panels) p.postMessage({ type: "event", event });
-  attend(event).catch((e) => console.error("[site-modder] attention:", e));
+/** Add an event to a tab's chat and show it. */
+function record(tabId, event) {
+  if (tabId == null) return;
+  let t = transcripts.get(tabId);
+  if (!t) transcripts.set(tabId, (t = []));
+  t.push(event);
+  if (t.length > MAX_TRANSCRIPT) transcripts.set(tabId, t.slice(-MAX_TRANSCRIPT));
+  for (const p of panels.get(tabId) ?? []) p.postMessage({ type: "event", event });
+  attend(tabId, event).catch((e) => console.error("[site-modder] attention:", e));
 }
 
-function state() {
-  return { bridge, auth, agents, model, userScripts: userScriptsAvailable(), modErrors };
+/** What a tab's side panel shows besides the chat itself. */
+function state(tabId) {
+  const chat = chats.get(tabId);
+  return {
+    bridge: {
+      connected,
+      agentId: chat?.agentId ?? null,
+      agent: chat?.agent ?? null,
+      ready: Boolean(chat?.ready),
+      busy: Boolean(chat?.busy),
+      needsAgent: connected && Boolean(chat) && !chat.agentId,
+      browserTools: chat?.browserTools ?? null,
+    },
+    auth: chat?.agentId ? (auths.get(chat.agentId) ?? null) : null,
+    model: chat?.model ?? null,
+    agents: agents && { ...agents, selected: chat?.agentId ?? null },
+    userScripts: userScriptsAvailable(),
+    modErrors,
+  };
 }
 
-function clearTranscript() {
-  transcript = [];
-  for (const p of panels) p.postMessage({ type: "init", state: state(), transcript });
+function initPanels(tabId) {
+  for (const p of panels.get(tabId) ?? []) {
+    p.postMessage({ type: "init", state: state(tabId), transcript: transcripts.get(tabId) ?? [] });
+  }
 }
 
-function broadcastState() {
-  for (const p of panels) p.postMessage({ type: "state", state: state() });
+/** Send fresh state to one tab's panel, or to every panel. */
+function broadcastState(tabId) {
+  const ids = tabId == null ? [...panels.keys()] : [tabId];
+  for (const id of ids) for (const p of panels.get(id) ?? []) p.postMessage({ type: "state", state: state(id) });
 }
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "sidepanel") return;
-  panels.add(port);
+  const m = /^sidepanel:(\d+)$/.exec(port.name);
+  if (!m) return;
+  const tabId = Number(m[1]);
+  if (!panels.has(tabId)) panels.set(tabId, new Set());
+  panels.get(tabId).add(port);
   connect();
-  port.postMessage({ type: "init", state: state(), transcript });
+  port.postMessage({ type: "init", state: state(tabId), transcript: transcripts.get(tabId) ?? [] });
+  // Agent Bridge sends the chat (and its history) back; it's the source of truth.
+  send({ type: "open_chat", tabId });
   port.onDisconnect.addListener(() => {
-    panels.delete(port);
+    panels.get(tabId)?.delete(port);
+    if (!panels.get(tabId)?.size) panels.delete(tabId);
     panelVisible.delete(port);
   });
   port.onMessage.addListener(async (msg) => {
+    const agentId = chats.get(tabId)?.agentId;
     switch (msg.type) {
       case "prompt": {
-        windowId = msg.windowId ?? windowId;
-        const tab = await activeTab().catch(() => null);
-        // Pin the agent's tools to this tab for the turn, even if the user
-        // switches tabs while it works.
-        targetTabId = tab?.id ?? null;
-        targetUrl = tab?.url ?? null;
-        record({ type: "user_message", text: msg.text, url: tab?.url });
-        send({ type: "prompt", text: msg.text, page: tab && { tabId: tab.id, url: tab.url, title: tab.title } });
+        const tab = await chrome.tabs.get(tabId).catch(() => null);
+        urlAtMessage.set(tabId, tab?.url ?? null);
+        send({ type: "prompt", tabId, text: msg.text, page: tab && { tabId, url: tab.url, title: tab.title } });
         break;
       }
       case "cancel":
-        declineTabRequests("the user stopped the agent");
-        send({ type: "cancel" });
+        declineTabRequests("the user stopped the agent", tabId);
+        send({ type: "cancel", tabId });
+        break;
+      case "new_session":
+        declineTabRequests("the user started a new chat", tabId);
+        send({ type: "new_session", tabId });
+        break;
+      case "set_model":
+      case "agent_select":
+        send({ ...msg, tabId });
+        break;
+      case "agents_refresh":
+        send(msg);
         break;
       case "auth_start":
       case "auth_input":
       case "auth_cancel":
       case "auth_logout":
       case "auth_recheck":
-      case "agent_select":
-      case "agents_refresh":
-      case "set_model":
-        send(msg);
+        if (agentId) send({ ...msg, agentId });
         break;
       case "tab_response":
-        tabRequests.get(msg.id)?.(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
-        break;
-      case "new_session":
-        send({ type: "new_session" });
-        clearTranscript();
+        tabRequests.get(msg.id)?.finish(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
         break;
       case "permission_response":
         send({ type: "permission_response", id: msg.id, optionId: msg.optionId });
         break;
-      case "set_window":
-        windowId = msg.windowId;
-        break;
       case "visibility":
         panelVisible.set(port, msg.visible);
         if (msg.visible) {
-          unseenTurnEnd = false;
-          updateBadge();
+          const a = attention.get(tabId);
+          if (a) a.unseenTurnEnd = false;
+          updateBadge(tabId);
         }
         break;
     }
@@ -205,20 +259,13 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // ---------- browser tools (called by the agent) ----------
 
-async function activeTab() {
-  const query = windowId != null ? { active: true, windowId } : { active: true, lastFocusedWindow: true };
-  const [tab] = await chrome.tabs.query(query);
-  if (!tab) throw new Error("No active tab");
-  return tab;
-}
-
-/** The tab the user's latest message was sent from; browser tools act on it. */
-async function targetTab() {
-  if (targetTabId == null) return activeTab();
+/** The tab a chat belongs to; its browser tools act on it. */
+async function targetTab(tabId) {
+  if (tabId == null) throw new Error("No tab given");
   try {
-    return await chrome.tabs.get(targetTabId);
+    return await chrome.tabs.get(tabId);
   } catch {
-    throw new Error("The tab this conversation was working on has been closed. Ask the user to send a message from the tab they want changed.");
+    throw new Error("This conversation's tab has been closed.");
   }
 }
 
@@ -234,6 +281,7 @@ const BACKGROUND_TAB_HELP =
  */
 function requestTabSwitch(tab) {
   const id = `t${++tabRequestSeq}`;
+  const event = { type: "tab_request", id, tabId: tab.id, title: tab.title, url: tab.url, purpose: "take a screenshot" };
   return new Promise((resolve) => {
     // byUser: they activated the tab themselves, so there's nothing to switch.
     const finish = async ({ accepted, reason, byUser = false }) => {
@@ -257,19 +305,19 @@ function requestTabSwitch(tab) {
         }
       }
       console.log(`[site-modder] tab request ${id}:`, accepted ? "switched" : reason);
-      record({ type: "tab_request_resolved", id, accepted, reason });
+      record(tab.id, { type: "tab_request_resolved", id, accepted, reason });
       resolve(accepted ? { ok: true } : { ok: false, reason });
     };
     const onActivated = (info) => info.tabId === tab.id && finish({ accepted: true, byUser: true });
     chrome.tabs.onActivated.addListener(onActivated);
-    tabRequests.set(id, finish);
-    record({ type: "tab_request", id, tabId: tab.id, title: tab.title, url: tab.url, purpose: "take a screenshot" });
+    tabRequests.set(id, { tabId: tab.id, event, finish });
+    record(tab.id, event);
   });
 }
 
-/** Resolve every open tab request as declined (agent stopped, Agent Bridge gone). */
-function declineTabRequests(reason) {
-  for (const finish of [...tabRequests.values()]) finish({ accepted: false, reason });
+/** Resolve open tab requests (for one tab, or all) as declined. */
+function declineTabRequests(reason, tabId) {
+  for (const r of [...tabRequests.values()]) if (tabId == null || r.tabId === tabId) r.finish({ accepted: false, reason });
 }
 
 /** Origin + path, ignoring query and hash (tracking params, in-page anchors). */
@@ -282,12 +330,13 @@ function pageKey(url) {
   }
 }
 
-/** A note for the agent if the pinned tab has navigated since the user's message. */
-async function navigationWarning() {
-  if (targetTabId == null || !targetUrl) return undefined;
-  const tab = await chrome.tabs.get(targetTabId).catch(() => null);
-  if (!tab?.url || pageKey(tab.url) === pageKey(targetUrl)) return undefined;
-  return `Note: the user navigated this tab from ${targetUrl} to ${tab.url} since their message; this result is from the new page.`;
+/** A note for the agent if its tab has navigated since the user's message. */
+async function navigationWarning(tabId) {
+  const before = urlAtMessage.get(tabId);
+  if (tabId == null || !before) return undefined;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.url || pageKey(tab.url) === pageKey(before)) return undefined;
+  return `Note: the user navigated this tab from ${before} to ${tab.url} since their message; this result is from the new page.`;
 }
 
 function userScriptsAvailable() {
@@ -328,21 +377,22 @@ async function blobToBase64(blob) {
 }
 
 const tools = {
-  async get_tab() {
-    const tab = await targetTab();
+  async get_tab({ tabId }) {
+    const tab = await targetTab(tabId);
+    const before = urlAtMessage.get(tabId) ?? null;
     return {
       tabId: tab.id,
       url: tab.url,
       title: tab.title,
       status: tab.status,
-      urlAtMessage: targetUrl,
-      navigatedSinceMessage: targetUrl != null && pageKey(tab.url) !== pageKey(targetUrl),
+      urlAtMessage: before,
+      navigatedSinceMessage: before != null && pageKey(tab.url) !== pageKey(before),
       userIsViewingIt: tab.active,
     };
   },
 
-  async get_page_content({ selector, format = "html", maxChars = 30000 }) {
-    const tab = await targetTab();
+  async get_page_content({ tabId, selector, format = "html", maxChars = 30000 }) {
+    const tab = await targetTab(tabId);
     return inPage(
       tab.id,
       (selector, format, maxChars) => {
@@ -372,8 +422,8 @@ const tools = {
     );
   },
 
-  async query_selector_all({ selector, limit = 20 }) {
-    const tab = await targetTab();
+  async query_selector_all({ tabId, selector, limit = 20 }) {
+    const tab = await targetTab(tabId);
     return inPage(
       tab.id,
       (selector, limit) => {
@@ -402,9 +452,9 @@ const tools = {
     );
   },
 
-  async run_js({ code, world = "isolated" }) {
+  async run_js({ tabId, code, world = "isolated" }) {
     if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
-    const tab = await targetTab();
+    const tab = await targetTab(tabId);
     const [res] = await chrome.userScripts.execute({
       target: { tabId: tab.id },
       js: [{ code }],
@@ -414,12 +464,12 @@ const tools = {
     return res?.result === undefined ? "undefined" : res.result;
   },
 
-  async screenshot() {
-    let tab = await targetTab();
+  async screenshot({ tabId }) {
+    let tab = await targetTab(tabId);
     if (!tab.active) {
       const { ok, reason } = await requestTabSwitch(tab);
       if (!ok) throw new Error(`The user didn't switch back to the tab (${reason}). ${BACKGROUND_TAB_HELP}`);
-      tab = await targetTab();
+      tab = await targetTab(tabId);
     }
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     // Capture is in device pixels (2x on Retina). Scale to CSS pixels so image
@@ -441,9 +491,9 @@ const tools = {
     };
   },
 
-  async get_console_logs({ limit = 50, levels }) {
+  async get_console_logs({ tabId, limit = 50, levels }) {
     if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
-    const tab = await targetTab();
+    const tab = await targetTab(tabId);
     const read = `(() => { const b = globalThis.__smConsole; return b ? b.slice() : null; })()`;
     const entries = [];
     let installed = false;
@@ -466,13 +516,13 @@ const tools = {
     };
   },
 
-  async apply_mods({ mods, changed }) {
-    await syncMods(mods, changed ?? []);
+  async apply_mods({ mods, changed, reloadTabs }) {
+    await syncMods(mods, changed ?? [], reloadTabs ?? null);
     return { errors: modErrors };
   },
 
-  async reload_tab() {
-    const tab = await targetTab();
+  async reload_tab({ tabId }) {
+    const tab = await targetTab(tabId);
     await reloadAndWait(tab.id);
     return "reloaded";
   },
@@ -483,11 +533,11 @@ async function runTool({ id, method, params }) {
     const fn = tools[method];
     if (!fn) throw new Error(`Unknown browser method ${method}`);
     const result = await fn(params ?? {});
-    const warning = method === "apply_mods" ? undefined : await navigationWarning();
+    const warning = method === "apply_mods" ? undefined : await navigationWarning(params?.tabId);
     send({ type: "tool_result", id, result, warning });
   } catch (e) {
     // Navigation often explains the failure (e.g. the tab is now on chrome://).
-    const warning = method === "apply_mods" ? undefined : await navigationWarning().catch(() => undefined);
+    const warning = method === "apply_mods" ? undefined : await navigationWarning(params?.tabId).catch(() => undefined);
     send({ type: "tool_result", id, error: [warning, String(e?.message ?? e)].filter(Boolean).join("\n") });
   }
 }
@@ -605,7 +655,12 @@ async function tabsMatching(mod) {
   }
 }
 
-async function syncMods(mods, changed) {
+/**
+ * Register mods as user scripts and apply changes to open tabs: CSS hot-swaps
+ * everywhere; other changes reload `reloadTabs` (the tabs whose agent made
+ * them), or every matching tab when that's null.
+ */
+async function syncMods(mods, changed, reloadTabs = null) {
   if (!userScriptsAvailable()) {
     broadcastState();
     return;
@@ -656,7 +711,10 @@ async function syncMods(mods, changed) {
         hotSwaps.push(chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code }] }).catch(() => {}));
       }
     } else {
-      for (const m of [before, after]) if (m?.matches?.length) for (const t of await tabsMatching(m)) toReload.add(t.id);
+      for (const m of [before, after]) {
+        if (!m?.matches?.length) continue;
+        for (const t of await tabsMatching(m)) if (!reloadTabs || reloadTabs.includes(t.id)) toReload.add(t.id);
+      }
     }
   }
   // Resolve only once changes are visible, so the agent's next tool call
@@ -665,34 +723,46 @@ async function syncMods(mods, changed) {
   lastMods = next;
   broadcastState();
   for (const [id, error] of Object.entries(modErrors)) {
-    if (changed.includes(id)) record({ type: "error", message: `Mod "${id}": ${error}` });
+    if (!changed.includes(id)) continue;
+    for (const tabId of reloadTabs ?? panels.keys()) record(tabId, { type: "error", message: `Mod "${id}": ${error}` });
   }
 }
 
+
 // ---------- attention: notifications + toolbar badge ----------
-// The agent keeps working with the side panel closed. When it finishes or
-// needs the user, and the user isn't watching the panel, notify them.
+// Agents keep working with the side panel closed or another tab in front.
+// When one finishes or needs the user, and the user isn't watching that
+// tab's panel, notify them. Each tab's toolbar badge shows its own state.
 
 const panelVisible = new Map(); // port -> whether that panel is visible
-const pendingPermissions = new Map(); // permission id -> options
-let unseenTurnEnd = false;
-let finalText = ""; // the agent's last run of text this turn, for the "done" notification
+const attention = new Map(); // tab id -> { permissions: Set, unseenTurnEnd, finalText }
 const notificationActions = new Map(); // notification id -> (buttonIndex | null) => void
 
-async function userIsWatching() {
-  if (![...panelVisible.values()].some(Boolean)) return false;
-  const win = await chrome.windows.getLastFocused().catch(() => null);
+function attentionFor(tabId) {
+  let a = attention.get(tabId);
+  if (!a) attention.set(tabId, (a = { permissions: new Set(), unseenTurnEnd: false, finalText: "" }));
+  return a;
+}
+
+/** Whether the user is looking at this tab's side panel right now. */
+async function userIsWatching(tabId) {
+  if (![...(panels.get(tabId) ?? [])].some((p) => panelVisible.get(p))) return false;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.active) return false;
+  const win = await chrome.windows.get(tab.windowId).catch(() => null);
   return Boolean(win?.focused);
 }
 
-async function notify(id, { title, message, buttons = [], sticky = false, onAction }) {
-  if (await userIsWatching()) return;
-  notificationActions.set(id, onAction ?? (() => focusConversation()));
+async function notify(tabId, id, { title, message, buttons = [], sticky = false, onAction }) {
+  if (await userIsWatching(tabId)) return;
+  notificationActions.set(id, onAction ?? (() => focusConversation(tabId)));
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
   chrome.notifications.create(id, {
     type: "basic",
     iconUrl: "icons/icon128.png",
     title,
     message: message || " ",
+    contextMessage: tab?.title ? clip(tab.title, 60) : undefined,
     buttons: buttons.slice(0, 2).map((t) => ({ title: t })),
     requireInteraction: sticky,
     priority: sticky ? 2 : 0,
@@ -704,14 +774,14 @@ function clearNotification(id) {
   chrome.notifications.clear(id).catch(() => {});
 }
 
-/** Bring the conversation's tab forward and try to open the side panel. */
-async function focusConversation() {
-  const tab = await targetTab().catch(() => null);
+/** Bring a chat's tab forward and try to open its side panel. */
+async function focusConversation(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab) return;
   await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
   await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   // Only allowed with a user gesture; a notification click may or may not count.
-  await chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+  await chrome.sidePanel.open({ tabId }).catch(() => {});
 }
 
 chrome.notifications.onClicked.addListener((id) => {
@@ -731,49 +801,48 @@ const clip = (s, n = 180) => {
   return t.length > n ? t.slice(0, n - 1) + "…" : t;
 };
 
-async function attend(event) {
+async function attend(tabId, event) {
+  const a = attentionFor(tabId);
   switch (event.type) {
     case "user_message":
-      finalText = "";
-      unseenTurnEnd = false;
+      a.finalText = "";
+      a.unseenTurnEnd = false;
       break;
     case "session_update": {
       const u = event.update;
-      if (u.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") finalText += u.content.text;
-      else if (u.sessionUpdate === "tool_call") finalText = "";
+      if (u.sessionUpdate === "agent_message_chunk" && u.content?.type === "text") a.finalText += u.content.text;
+      else if (u.sessionUpdate === "tool_call") a.finalText = "";
       return;
     }
     case "permission_request": {
-      pendingPermissions.set(event.id, event.options);
+      a.permissions.add(event.id);
       const allow = event.options.find((o) => o.kind === "allow_once");
       const reject = event.options.find((o) => o.kind === "reject_once");
       const choices = [allow, reject].filter(Boolean);
-      await notify(`perm:${event.id}`, {
+      await notify(tabId, `perm:${event.id}`, {
         title: "site-modder needs your permission",
         message: clip(event.toolCall?.title ?? "The agent wants to run a tool"),
         buttons: choices.map((o) => o.name),
         sticky: true,
         onAction: (index) => {
-          if (index == null) return focusConversation();
+          if (index == null) return focusConversation(tabId);
           send({ type: "permission_response", id: event.id, optionId: choices[index].optionId });
         },
       });
       break;
     }
     case "permission_resolved":
-      pendingPermissions.delete(event.id);
+      a.permissions.delete(event.id);
       clearNotification(`perm:${event.id}`);
       break;
     case "tab_request":
-      await notify(`tab:${event.id}`, {
+      await notify(tabId, `tab:${event.id}`, {
         title: "site-modder wants to see a tab",
         message: clip(`Switch back to “${event.title || event.url}” so the agent can ${event.purpose}.`),
         buttons: ["Switch to tab", "Not now"],
         sticky: true,
         onAction: (index) =>
-          tabRequests.get(event.id)?.(
-            index === 1 ? { accepted: false, reason: "the user chose Not now" } : { accepted: true },
-          ),
+          tabRequests.get(event.id)?.finish(index === 1 ? { accepted: false, reason: "the user chose Not now" } : { accepted: true }),
       });
       break;
     case "tab_request_resolved":
@@ -781,33 +850,34 @@ async function attend(event) {
       break;
     case "turn_end": {
       if (event.stopReason === "cancelled") break; // the user stopped it; they know
-      const watching = await userIsWatching();
-      unseenTurnEnd = !watching;
+      a.unseenTurnEnd = !(await userIsWatching(tabId));
       const failed = event.stopReason === "error" || event.stopReason === "refusal";
-      await notify(`done:${Date.now()}`, {
+      await notify(tabId, `done:${tabId}:${Date.now()}`, {
         title: failed ? "site-modder stopped with an error" : "site-modder is done",
-        message: clip(finalText) || (failed ? "Open the side panel for details." : "The agent finished its turn."),
+        message: clip(a.finalText) || (failed ? "Open the side panel for details." : "The agent finished its turn."),
       });
       break;
     }
     default:
       return;
   }
-  updateBadge();
+  updateBadge(tabId);
 }
 
-function updateBadge() {
+function updateBadge(tabId) {
+  const a = attention.get(tabId);
+  const waiting = a?.permissions.size || [...tabRequests.values()].some((r) => r.tabId === tabId);
   let text = "";
   let color = "#6e6e73";
-  if (pendingPermissions.size || tabRequests.size) {
+  if (waiting) {
     text = "!";
     color = "#c2410c";
-  } else if (bridge.busy) {
+  } else if (chats.get(tabId)?.busy) {
     text = "…";
-  } else if (unseenTurnEnd) {
+  } else if (a?.unseenTurnEnd) {
     text = "✓";
     color = "#15803d";
   }
-  chrome.action.setBadgeText({ text }).catch(() => {});
-  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
+  chrome.action.setBadgeText({ tabId, text }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ tabId, color }).catch(() => {});
 }

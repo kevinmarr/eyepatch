@@ -27,9 +27,22 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄
 4. Click the toolbar icon to open the side panel, pick a coding agent, and ask
    for a change.
 
+## Tabs and chats
+
+Each tab has its own side panel and its own chat. Switching tabs hides the
+panel, and switching back shows it again with the conversation intact.
+Several tabs can have chats going at once, each with its own agent and model,
+and each agent's browser tools act only on its own tab. A chat continues if
+the tab navigates to another page. Closing the tab ends the chat; it's saved
+in `~/.site-modder/sessions/` (for a history menu later).
+
+Tabs using the same agent share one copy of it running in Agent Bridge. An
+agent that no open tab uses is stopped.
+
 ## Agents
 
-The first time you open the side panel, it asks you to pick a coding agent.
+The first time you open a side panel, it asks you to pick a coding agent. New
+tabs start with the agent you picked most recently.
 The list comes from the [ACP registry](https://agentclientprotocol.com/get-started/registry),
 the same one Zed uses. Like Zed, site-modder installs its own copy of the agent
 you pick in `~/.site-modder/agents/<id>/<version>`, so it always has a version
@@ -46,8 +59,10 @@ Copies can be large: Claude Agent is about 200 MB to download and 425 MB on
 disk, since it includes Claude Code. Agents usually share sign-in with their
 regular install, so if you already use one you're probably signed in.
 
-To switch, click the agent's name in the header and choose **Change agent**.
-Switching starts a new conversation.
+To switch a tab's agent, click the agent's name in the header and choose
+**Change agent**. Switching starts a new conversation in that tab. The model
+menu under the message box is per tab too; the model you pick last for an
+agent is what its new chats start with.
 
 The browser tools reach the agent over MCP-over-ACP. Agents that don't support
 it (Codex, for now) can still write mods but can't see the page, and the side
@@ -74,16 +89,17 @@ which can include using it outside site-modder.
 
 ## Working in the background
 
-The agent keeps working when the side panel is closed or you switch tabs. Its
-browser tools stay on the tab you sent the message from. When you're not
-watching the panel, Chrome notifications tell you when the agent:
+Agents keep working when the side panel is closed or you switch tabs. When
+you're not watching a tab's panel, Chrome notifications (naming the tab) tell
+you when its agent:
 
 - finishes a turn,
 - needs permission (Allow and Deny buttons are on the notification), or
 - needs you to switch back to a tab so it can take a screenshot.
 
-The toolbar badge shows the same thing at a glance: `…` while it's working,
-`!` when it needs you, and `✓` when it has finished and you haven't looked yet.
+Each tab's toolbar badge shows the same thing at a glance: `…` while its
+agent is working, `!` when it needs you, and `✓` when it has finished and you
+haven't looked yet.
 On macOS, Chrome itself needs notification permission (System Settings →
 Notifications → Google Chrome).
 
@@ -92,9 +108,10 @@ Notifications → Google Chrome).
 Each mod is a folder in `~/.site-modder/mods/<id>/` with `mod.json`, and
 optionally `mod.css` and `mod.js`. The agent's working directory is
 `~/.site-modder/mods`, and `CLAUDE.md`/`AGENTS.md` there describe the format.
-Files apply live: CSS hot-swaps in open tabs, and a JS change reloads matching
-tabs. You can edit mods by hand, or with Claude Code in a terminal, and they
-apply the same way.
+Files apply live: CSS hot-swaps in every open tab. A JS change reloads the tab
+whose agent made it, not other tabs on the same site (they pick it up when they
+next load). Edits you make by hand, or with Claude Code in a terminal, reload
+every matching tab.
 
 ## Dev loop
 

@@ -3,21 +3,23 @@ import { EXTENSION_ID } from "./config.js";
 
 /** Messages the extension sends to Agent Bridge. */
 export type FromExtension =
-  | { type: "hello"; extensionVersion?: string }
-  | { type: "prompt"; text: string; page?: PageInfo }
-  | { type: "cancel" }
-  | { type: "new_session" }
+  | { type: "hello"; extensionVersion?: string; tabs?: number[] }
+  | { type: "open_chat"; tabId: number }
+  | { type: "close_chat"; tabId: number }
+  | { type: "prompt"; tabId: number; text: string; page?: PageInfo }
+  | { type: "cancel"; tabId: number }
+  | { type: "new_session"; tabId: number }
   | { type: "permission_response"; id: string; optionId: string | null }
   | { type: "tool_result"; id: string; result?: unknown; error?: string; warning?: string }
-  | { type: "auth_start"; methodId: string }
-  | { type: "auth_input"; text: string }
-  | { type: "auth_cancel" }
-  | { type: "auth_logout" }
-  | { type: "auth_recheck" }
-  | { type: "agent_select"; id: string }
+  | { type: "set_model"; tabId: number; value: string }
+  | { type: "agent_select"; tabId: number; id: string }
   | { type: "agents_refresh" }
   | { type: "sync_mods" }
-  | { type: "set_model"; value: string };
+  | { type: "auth_start"; agentId: string; methodId: string }
+  | { type: "auth_input"; agentId: string; text: string }
+  | { type: "auth_cancel"; agentId: string }
+  | { type: "auth_logout"; agentId: string }
+  | { type: "auth_recheck"; agentId: string };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 

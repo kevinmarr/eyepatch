@@ -31,6 +31,9 @@ const INSTALL_INFO = ".site-modder-install.json";
 /** Shown first in the picker; the rest are under "More agents". */
 const FEATURED = ["claude-acp", "codex-acp", "gemini", "github-copilot-cli", "cursor", "opencode"];
 
+/** Id used for the agent given by SITE_MODDER_AGENT. */
+export const CUSTOM = "custom";
+
 export type LaunchSpec = { cmd: string; args: string[]; env: Record<string, string> };
 
 type BinaryTarget = { archive: string; cmd: string; args?: string[]; env?: Record<string, string>; sha256?: string };
@@ -153,7 +156,7 @@ export class AgentManager {
   private installing: InstallProgress | null = null;
   private installError: { id: string; message: string } | null = null;
   private readonly custom = process.env.SITE_MODDER_AGENT?.trim() || null;
-  private changeListeners: Array<(reason: "selected" | "updated") => void> = [];
+  private updateListeners: Array<(id: string) => void> = [];
 
   constructor(private readonly send: (msg: Record<string, unknown>) => void) {}
 
@@ -168,45 +171,51 @@ export class AgentManager {
       .then((s) => JSON.parse(s).agents ?? [])
       .catch(() => []);
     await this.scanInstalled();
-    // Fetch a fresh catalog in the background; it may bring an update.
+    // Fetch a fresh catalog in the background; it may bring updates.
     void this.refresh();
   }
 
-  /** "selected" = the user picked another agent; "updated" = a newer copy is ready. */
-  onChange(listener: (reason: "selected" | "updated") => void) {
-    this.changeListeners.push(listener);
+  /** A newer copy of an installed agent is ready; it's used the next time that agent starts. */
+  onUpdated(listener: (id: string) => void) {
+    this.updateListeners.push(listener);
   }
 
-  get selectedId(): string | null {
-    if (this.custom) return "custom";
+  /** The agent new tabs start with: the one picked most recently. */
+  get defaultId(): string | null {
+    if (this.custom) return CUSTOM;
     // A chosen agent whose copy is gone (e.g. its folder was deleted) has to be picked again.
     const id = this.settings.agent;
     return id && this.installed.has(id) ? id : null;
   }
 
-  /** How to start the selected agent, or undefined if none is chosen/installed. */
-  launchSpec(): LaunchSpec | undefined {
+  isInstalled(id: string) {
+    return id === CUSTOM ? Boolean(this.custom) : this.installed.has(id);
+  }
+
+  /** How to start an agent, or undefined if it isn't installed. */
+  launchSpec(id: string): LaunchSpec | undefined {
     if (this.custom) {
       const [cmd, ...args] = this.custom.split(/\s+/);
       return { cmd, args, env: {} };
     }
-    const id = this.settings.agent;
-    const launch = id ? this.installed.get(id)?.launch : undefined;
-    if (!id || !launch) return undefined;
-    const dir = versionDir(id, this.installed.get(id)!.version);
+    const info = this.installed.get(id);
+    if (!info) return undefined;
+    const dir = versionDir(id, info.version);
     const fill = (s: string) => (s === NODE ? process.execPath : s.startsWith(DIR) ? dir + s.slice(DIR.length) : s);
-    return { cmd: fill(launch.cmd), args: launch.args.map(fill), env: launch.env };
+    return { cmd: fill(info.launch.cmd), args: info.launch.args.map(fill), env: info.launch.env };
   }
 
-  /** The model last picked for the selected agent. */
-  preferredModel(): string | undefined {
-    const id = this.selectedId;
-    return id ? this.settings.models?.[id] : undefined;
+  /** Display name from the registry. */
+  nameOf(id: string) {
+    return this.registry.find((a) => a.id === id)?.name ?? id;
   }
 
-  async setPreferredModel(value: string) {
-    const id = this.selectedId;
-    if (!id) return;
+  /** The model last picked for an agent. */
+  preferredModel(id: string): string | undefined {
+    return this.settings.models?.[id];
+  }
+
+  async setPreferredModel(id: string, value: string) {
     this.settings.models = { ...this.settings.models, [id]: value };
     await this.saveSettings();
   }
@@ -215,11 +224,10 @@ export class AgentManager {
     return fs.writeFile(SETTINGS_FILE, JSON.stringify(this.settings, null, 2));
   }
 
-  /** Delete copies of the selected agent other than the one we launch. */
-  async pruneOldVersions() {
-    const id = this.settings.agent;
-    const keep = id && this.installed.get(id);
-    if (!keep || this.installing) return; // don't delete an install in progress
+  /** Delete copies of an agent other than the one we launch. */
+  async pruneOldVersions(id: string) {
+    const keep = this.installed.get(id);
+    if (!keep || this.installing?.id === id) return; // don't delete an install in progress
     const dir = path.dirname(versionDir(id, keep.version));
     for (const v of await fs.readdir(dir).catch(() => [])) {
       if (path.join(dir, v) !== versionDir(id, keep.version)) {
@@ -242,41 +250,50 @@ export class AgentManager {
       console.warn("[agents]", this.registryError);
     }
     this.sendView();
-    void this.updateSelected();
+    void this.updateInstalled();
   }
 
-  /** Install the registry's newer version of the selected agent, if there is one. */
-  private async updateSelected() {
-    const id = this.settings.agent;
-    const current = id && this.installed.get(id);
-    const latest = id && this.registry.find((a) => a.id === id);
-    if (this.custom || !current || !latest || latest.version === current.version || this.installing) return;
-    console.log(`[agents] updating ${id} ${current.version} → ${latest.version}`);
-    try {
-      await this.install(latest, true);
-      for (const l of this.changeListeners) l("updated");
-    } catch (e) {
-      console.warn(`[agents] update of ${id} failed:`, (e as Error).message);
+  /** Install the registry's newer versions of installed agents, one at a time. */
+  private async updateInstalled() {
+    if (this.custom) return;
+    for (const [id, current] of [...this.installed]) {
+      const latest = this.registry.find((a) => a.id === id);
+      if (!latest || latest.version === current.version || this.installing) continue;
+      console.log(`[agents] updating ${id} ${current.version} → ${latest.version}`);
+      try {
+        await this.install(latest, true);
+        for (const l of this.updateListeners) l(id);
+      } catch (e) {
+        console.warn(`[agents] update of ${id} failed:`, (e as Error).message);
+      }
     }
   }
 
-  /** Pick an agent, installing it first if needed. */
-  async select(id: string) {
-    if (this.custom || this.installing) return;
+  /**
+   * Make sure an agent is installed (installing it if needed) and make it the
+   * default for new tabs. Returns false if it couldn't be installed.
+   */
+  async choose(id: string): Promise<boolean> {
+    if (this.custom) return id === CUSTOM;
+    if (this.installing) return false;
     this.installError = null;
     const agent = this.registry.find((a) => a.id === id);
     if (!this.installed.has(id)) {
-      if (!agent) return this.failInstall(id, "That agent isn't in the registry");
+      if (!agent) {
+        this.failInstall(id, "That agent isn't in the registry");
+        return false;
+      }
       try {
         await this.install(agent, false);
       } catch (e) {
-        return this.failInstall(id, (e as Error).message);
+        this.failInstall(id, (e as Error).message);
+        return false;
       }
     }
     this.settings.agent = id;
     await this.saveSettings();
     this.sendView();
-    for (const l of this.changeListeners) l("selected");
+    return true;
   }
 
   private failInstall(id: string, message: string) {
@@ -435,7 +452,7 @@ export class AgentManager {
       }
     }
     return {
-      selected: this.selectedId,
+      defaultAgent: this.defaultId,
       custom: this.custom,
       agentsDir: AGENTS_DIR.startsWith(os.homedir() + path.sep) ? "~" + AGENTS_DIR.slice(os.homedir().length) : AGENTS_DIR,
       list,

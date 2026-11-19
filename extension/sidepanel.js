@@ -1,4 +1,6 @@
 const $ = (id) => document.getElementById(id);
+// Each tab has its own side panel and chat; this is the tab this panel belongs to.
+const TAB_ID = Number(new URLSearchParams(location.search).get("tab"));
 const log = $("log");
 const input = $("input");
 
@@ -15,7 +17,7 @@ const permissionEls = new Map();
 // ---------- connection to the service worker ----------
 
 function connectPort() {
-  port = chrome.runtime.connect({ name: "sidepanel" });
+  port = chrome.runtime.connect({ name: `sidepanel:${TAB_ID}` });
   port.onMessage.addListener((msg) => {
     if (msg.type === "init") {
       resetLog();
@@ -29,7 +31,6 @@ function connectPort() {
   });
   // The service worker can restart (e.g. extension reload); reconnect.
   port.onDisconnect.addListener(() => setTimeout(connectPort, 500));
-  chrome.windows.getCurrent().then((w) => port.postMessage({ type: "set_window", windowId: w.id }));
   reportVisibility();
 }
 
@@ -93,12 +94,10 @@ $("banners").addEventListener("click", (e) => {
 });
 
 async function updatePage() {
-  const w = await chrome.windows.getCurrent();
-  const [tab] = await chrome.tabs.query({ active: true, windowId: w.id });
+  const tab = await chrome.tabs.get(TAB_ID).catch(() => null);
   $("page").textContent = tab?.url ? `On: ${tab.url}` : "";
 }
-chrome.tabs.onActivated.addListener(updatePage);
-chrome.tabs.onUpdated.addListener((_id, info) => info.url && updatePage());
+chrome.tabs.onUpdated.addListener((id, info) => id === TAB_ID && info.url && updatePage());
 updatePage();
 
 // ---------- composer ----------
@@ -106,7 +105,7 @@ updatePage();
 function submit() {
   const text = input.value.trim();
   if (!text || !state?.bridge.ready || state.bridge.busy) return;
-  chrome.windows.getCurrent().then((w) => port.postMessage({ type: "prompt", text, windowId: w.id }));
+  port.postMessage({ type: "prompt", text });
   input.value = "";
 }
 $("composer").addEventListener("submit", (e) => {
@@ -479,8 +478,9 @@ function renderAgents(agents, c) {
     chooseAgent = false; // the choice went through
     pickedId = null;
   }
-  if (agents?.installError) pickedId = null;
-  const installingChoice = agents?.installing && !agents.installing.update;
+  if (agents?.installError && agents.installError.id === pickedId && !agents.installing) pickedId = null;
+  // Only the panel that started an install keeps showing it (other tabs keep chatting).
+  const installingChoice = agents?.installing && !agents.installing.update && pickedId === agents.installing.id;
   const show = Boolean(c.connected && agents && !agents.custom && (!agents.selected || chooseAgent || installingChoice));
   el.hidden = !show;
   if (!show) return false;
