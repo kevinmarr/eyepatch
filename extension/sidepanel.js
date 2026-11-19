@@ -54,6 +54,7 @@ function setState(s) {
   }
   $("stop").hidden = !c.busy;
   $("new").hidden = !hasAgent;
+  renderModel(s.model);
   $("send").disabled = !c.ready || c.busy || needsSignIn(s.auth);
   renderAuth(s.auth, c);
 
@@ -120,6 +121,20 @@ input.addEventListener("keydown", (e) => {
 });
 $("stop").addEventListener("click", () => port.postMessage({ type: "cancel" }));
 $("new").addEventListener("click", () => port.postMessage({ type: "new_session" }));
+
+function renderModel(model) {
+  const el = $("model");
+  el.hidden = !model?.options.length;
+  if (el.hidden) return;
+  const key = JSON.stringify(model);
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.innerHTML = model.options
+    .map((o) => `<option value="${esc(o.value)}" ${o.value === model.current ? "selected" : ""}>${esc(o.name)}</option>`)
+    .join("");
+  el.title = model.options.find((o) => o.value === model.current)?.description ?? "";
+}
+$("model").addEventListener("change", (e) => port.postMessage({ type: "set_model", value: e.target.value }));
 
 // ---------- transcript rendering ----------
 

@@ -22,7 +22,10 @@
     <form id="composer">
       <div id="page" class="page"></div>
       <textarea id="input" rows="3" placeholder="Describe a change to this page…"></textarea>
-      <button id="send" type="submit">Send</button>
+      <div class="composer-row">
+        <select id="model" aria-label="Model" hidden></select>
+        <button id="send" type="submit">Send</button>
+      </div>
     </form>
     <script src="sidepanel.js" type="module"></script>
   </body>

@@ -79,6 +79,7 @@ export class AgentHost {
     extension.onConnect(() => {
       this.sendStatus();
       this.auth.send();
+      this.sendModel();
       agents.sendView();
     });
     agents.onChange((reason) => {
@@ -151,9 +152,13 @@ export class AgentHost {
     const app = acp
       .client({ name: "site-modder" })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
-        if (params.sessionId === this.sessionId) {
-          this.extension.send({ type: "session_update", update: params.update });
+        if (params.sessionId !== this.sessionId) return;
+        if (params.update.sessionUpdate === "config_option_update") {
+          this.configOptions = params.update.configOptions;
+          this.sendModel();
+          return;
         }
+        this.extension.send({ type: "session_update", update: params.update });
       })
       .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) =>
         this.requestPermission(params, signal),
@@ -188,12 +193,18 @@ export class AgentHost {
     this.ready = true;
     console.log(`[agent] ready: ${this.agentName} (protocol v${init.protocolVersion})`);
     this.sendStatus();
+    // Start the conversation now so the agent's models can be shown before
+    // the first message.
+    void this.ensureSession().catch(() => {});
   }
 
   private reset() {
     this.ready = false;
     this.busy = false;
     this.sessionId = undefined;
+    this.sessionStarting = undefined;
+    this.configOptions = [];
+    this.sendModel();
     this.browserServer = undefined;
     this.cancelPendingPermissions();
     this.sendStatus();
@@ -229,6 +240,10 @@ export class AgentHost {
       case "hello":
         this.sendStatus();
         this.auth.send();
+        this.sendModel();
+        break;
+      case "set_model":
+        void this.setModel(msg.value);
         break;
       case "auth_start":
         void this.auth.start(msg.methodId);
@@ -256,24 +271,93 @@ export class AgentHost {
     }
   }
 
-  private async ensureSession(): Promise<string> {
-    if (this.sessionId) return this.sessionId;
+  private sessionStarting?: Promise<string>;
+  private configOptions: acp.SessionConfigOption[] = [];
+
+  /** The agent's model choice, if it offers one (a "model" config option). */
+  private modelOption() {
+    const opt = this.configOptions.find((o) => o.category === "model" && o.type === "select");
+    return opt?.type === "select" ? opt : undefined;
+  }
+
+  private sendModel() {
+    const opt = this.modelOption();
+    const flat = (opt?.options ?? []).flatMap((o) => ("group" in o ? o.options : [o]));
+    this.extension.send({
+      type: "model",
+      model: opt && {
+        current: opt.currentValue,
+        options: flat.map((o) => ({ value: o.value, name: o.name, description: o.description ?? null })),
+      },
+    });
+  }
+
+  private async setModel(value: string) {
+    try {
+      const sessionId = await this.ensureSession();
+      const opt = this.modelOption();
+      if (!opt) return;
+      const res = await this.conn!.agent.request(acp.methods.agent.session.setConfigOption, {
+        sessionId,
+        configId: opt.id,
+        value,
+      });
+      this.configOptions = res.configOptions;
+      await this.agents.setPreferredModel(value);
+    } catch (e) {
+      this.extension.send({ type: "error", message: `Couldn't change the model: ${(e as Error).message}` });
+    }
+    this.sendModel();
+  }
+
+  /** Create the session once, even if several callers ask at the same time. */
+  private ensureSession(): Promise<string> {
+    if (this.sessionId) return Promise.resolve(this.sessionId);
+    this.sessionStarting ??= this.createSession().finally(() => (this.sessionStarting = undefined));
+    return this.sessionStarting;
+  }
+
+  private async createSession(): Promise<string> {
+    const conn = this.conn!;
     const mcpServers: acp.McpServer[] =
       this.supportsAcpMcp && this.browserServer ? [this.browserServer.declaration] : [];
-    const res = await this.conn!.agent.request(acp.methods.agent.session.new, {
-      cwd: MODS_DIR,
-      mcpServers,
-    });
+    let res: acp.NewSessionResponse;
+    try {
+      res = await conn.agent.request(acp.methods.agent.session.new, { cwd: MODS_DIR, mcpServers });
+    } catch (e) {
+      if ((e as { code?: number }).code === AUTH_REQUIRED) this.auth.markAuthRequired();
+      throw e;
+    }
+    if (this.conn !== conn) throw new Error("The agent restarted");
     this.sessionId = res.sessionId;
+    this.configOptions = res.configOptions ?? [];
     // Mods live in their own directory and apply live, so don't prompt for
     // every file edit. Commands and other tools still ask in the side panel.
     const acceptEdits = res.modes?.availableModes.find((m) => m.id === "acceptEdits");
     if (acceptEdits) {
-      await this.conn!.agent.request(acp.methods.agent.session.setMode, {
+      await conn.agent.request(acp.methods.agent.session.setMode, {
         sessionId: res.sessionId,
         modeId: acceptEdits.id,
       });
     }
+    // Use the model the user last picked for this agent.
+    const preferred = this.agents.preferredModel();
+    const opt = this.modelOption();
+    const flat = (opt?.options ?? []).flatMap((o) => ("group" in o ? o.options : [o]));
+    if (opt && preferred && preferred !== opt.currentValue && flat.some((o) => o.value === preferred)) {
+      try {
+        const set = await conn.agent.request(acp.methods.agent.session.setConfigOption, {
+          sessionId: res.sessionId,
+          configId: opt.id,
+          value: preferred,
+        });
+        this.configOptions = set.configOptions;
+      } catch (e) {
+        console.warn("[agent] couldn't restore the model:", (e as Error).message);
+      }
+    }
+    this.sendModel();
+    this.sendStatus();
     return res.sessionId;
   }
 
@@ -329,6 +413,7 @@ export class AgentHost {
     await this.cancel();
     this.sessionId = undefined;
     this.sendStatus();
+    if (this.ready) void this.ensureSession().catch(() => {});
   }
 
   private requestPermission(

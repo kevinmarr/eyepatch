@@ -148,7 +148,7 @@ async function launchForScript(file: string, args: string[], env: Record<string,
 export class AgentManager {
   private registry: RegistryAgent[] = [];
   private registryError: string | null = null;
-  private settings: { agent?: string } = {};
+  private settings: { agent?: string; models?: Record<string, string> } = {};
   private installed = new Map<string, InstallInfo>(); // id -> newest installed copy
   private installing: InstallProgress | null = null;
   private installError: { id: string; message: string } | null = null;
@@ -196,6 +196,23 @@ export class AgentManager {
     const dir = versionDir(id, this.installed.get(id)!.version);
     const fill = (s: string) => (s === NODE ? process.execPath : s.startsWith(DIR) ? dir + s.slice(DIR.length) : s);
     return { cmd: fill(launch.cmd), args: launch.args.map(fill), env: launch.env };
+  }
+
+  /** The model last picked for the selected agent. */
+  preferredModel(): string | undefined {
+    const id = this.selectedId;
+    return id ? this.settings.models?.[id] : undefined;
+  }
+
+  async setPreferredModel(value: string) {
+    const id = this.selectedId;
+    if (!id) return;
+    this.settings.models = { ...this.settings.models, [id]: value };
+    await this.saveSettings();
+  }
+
+  private saveSettings() {
+    return fs.writeFile(SETTINGS_FILE, JSON.stringify(this.settings, null, 2));
   }
 
   /** Delete copies of the selected agent other than the one we launch. */
@@ -257,7 +274,7 @@ export class AgentManager {
       }
     }
     this.settings.agent = id;
-    await fs.writeFile(SETTINGS_FILE, JSON.stringify(this.settings, null, 2));
+    await this.saveSettings();
     this.sendView();
     for (const l of this.changeListeners) l("selected");
   }

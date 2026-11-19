@@ -112,11 +112,26 @@ details.thought div { white-space: pre-wrap; padding-left: 12px; }
 #composer {
   border-top: 1px solid var(--border);
   padding: 8px 12px 12px;
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
-.page { grid-column: 1 / -1; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-row { display: flex; align-items: center; gap: 6px; }
+#model {
+  min-width: 0;
+  max-width: 60%;
+  field-sizing: content; /* as wide as the chosen model's name */
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+#model:hover { border-color: var(--border); color: var(--fg); }
 textarea {
   font: inherit;
   resize: none;
@@ -127,7 +142,7 @@ textarea {
   color: var(--fg);
 }
 textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-#send { align-self: end; }
+#send { margin-left: auto; }
 
 /* ---------- account + sign-in ---------- */
 .agent-btn {

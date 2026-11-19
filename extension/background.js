@@ -12,6 +12,7 @@ const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model A
 let ws = null;
 let bridge = { connected: false, agent: null, ready: false, busy: false };
 let auth = null; // agent sign-in state, from Agent Bridge
+let model = null; // the agent's model choice ({ current, options }), if it has one
 let agents = null; // agent catalog, selection and install progress, from Agent Bridge
 let transcript = []; // chat events, replayed to side panels when they open
 let windowId = null; // window of the panel that sent the last prompt
@@ -60,6 +61,7 @@ async function connect() {
     bridge = { connected: false, agent: null, ready: false, busy: false };
     auth = null;
     agents = null;
+    model = null;
     broadcastState();
     setTimeout(connect, 2000);
   };
@@ -108,6 +110,9 @@ async function onBridgeMessage(msg) {
     case "agents":
       agents = msg.agents;
       return broadcastState();
+    case "model":
+      model = msg.model ?? null;
+      return broadcastState();
     case "agent_changed":
       // A different agent doesn't share the old one's conversation.
       return clearTranscript();
@@ -126,7 +131,7 @@ function record(event) {
 }
 
 function state() {
-  return { bridge, auth, agents, userScripts: userScriptsAvailable(), modErrors };
+  return { bridge, auth, agents, model, userScripts: userScriptsAvailable(), modErrors };
 }
 
 function clearTranscript() {
@@ -171,6 +176,7 @@ chrome.runtime.onConnect.addListener((port) => {
       case "auth_recheck":
       case "agent_select":
       case "agents_refresh":
+      case "set_model":
         send(msg);
         break;
       case "tab_response":
