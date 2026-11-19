@@ -16,7 +16,7 @@ import { MODS_DIR } from "./config.js";
  *   to the panel, e.g. to paste an OAuth code); other methods are handed to
  *   the agent with `authenticate`.
  * - `auth/status` and `auth/status_update` say whether it's signed in and as
- *   whom; `logout` signs out. Agents without these still work: we learn they
+ *   whom. Agents without these still work: we learn they
  *   need sign-in when a prompt fails with ACP's auth-required error.
  */
 
@@ -61,7 +61,8 @@ export class AuthManager {
   /** Call after each `initialize` (including after a restart). */
   onInitialized(init: acp.InitializeResponse) {
     this.agentName = init.agentInfo?.title ?? init.agentInfo?.name ?? "agent";
-    this.methods = init.authMethods ?? [];
+    // Skip malformed entries (no id to sign in with, or no name to show).
+    this.methods = (init.authMethods ?? []).filter((m) => m.id && m.name);
     this.caps = init.agentCapabilities?.auth;
     this.state = "unknown";
     this.accounts = [];
@@ -79,9 +80,19 @@ export class AuthManager {
     this.send();
   }
 
+  /**
+   * A prompt went through, so the agent is signed in. Agents that don't report
+   * their status (e.g. Codex) only show as signed in once this happens.
+   */
+  markWorking() {
+    if (this.state !== "unknown") return;
+    this.state = "authenticated";
+    this.send();
+  }
+
   /** Claude's status check can time out while it starts; ask again later. */
   refreshIfUnknown() {
-    if (this.state === "unknown") void this.refresh();
+    if (this.state === "unknown" && this.caps?.status) void this.refresh();
   }
 
   get needsSignIn() {
@@ -96,8 +107,24 @@ export class AuthManager {
       } catch (e) {
         console.warn("[auth] status failed:", (e as Error).message);
       }
+    } else if (conn) {
+      await this.probe(conn);
     }
     this.send();
+  }
+
+  /**
+   * For agents that can't report whether they're signed in (e.g. Cursor,
+   * Codex): ask for a conversation. Signed-out agents refuse with ACP's
+   * auth-required error. The conversation itself is never used.
+   */
+  private async probe(conn: acp.ClientConnection) {
+    try {
+      await conn.agent.request(acp.methods.agent.session.new, { cwd: MODS_DIR, mcpServers: [] });
+      this.applyStatus({ state: "authenticated" });
+    } catch (e) {
+      if ((e as { code?: number }).code === AUTH_REQUIRED) this.applyStatus({ state: "unauthenticated" });
+    }
   }
 
   private applyStatus(s: { state: acp.AuthState; accounts?: acp.AuthAccount[] }) {
@@ -124,7 +151,6 @@ export class AuthManager {
         description: m.description ?? null,
         kind: isTerminal(m) ? "terminal" : "agent",
       })),
-      canLogout: Boolean(this.caps?.logout),
       signIn: this.signIn && { methodId: this.signIn.methodId, name: this.signIn.name, output: this.signIn.output },
       error: this.error,
     };
@@ -192,14 +218,18 @@ export class AuthManager {
   private async runAgent(method: acp.AuthMethod) {
     const conn = this.deps.conn();
     if (!conn) return this.fail("The agent isn't running");
-    this.signIn = { methodId: method.id, name: method.name, output: "" };
+    const run: SignIn = { methodId: method.id, name: method.name, output: "" };
+    this.signIn = run;
     this.send();
     try {
       await conn.agent.request(acp.methods.agent.authenticate, { methodId: method.id });
+      if (this.signIn !== run) return; // cancelled
       this.signIn = null;
-      if (!this.caps?.status) this.state = "authenticated";
       await this.refresh();
+      // It said yes, but it still refuses to work.
+      if (this.state === "unauthenticated") this.fail(`${this.agentName} still isn't signed in.`);
     } catch (e) {
+      if (this.signIn !== run) return;
       this.signIn = null;
       this.fail(`Sign-in failed: ${(e as Error).message}`);
     }
@@ -221,17 +251,6 @@ export class AuthManager {
     run.child?.kill();
     this.signIn = null;
     this.send();
-  }
-
-  async logout() {
-    const conn = this.deps.conn();
-    if (!conn || !this.caps?.logout) return;
-    try {
-      await conn.agent.request(acp.methods.agent.logout, {});
-    } catch (e) {
-      return this.fail(`Sign-out failed: ${(e as Error).message}`);
-    }
-    await this.refresh();
   }
 
   private fail(message: string) {

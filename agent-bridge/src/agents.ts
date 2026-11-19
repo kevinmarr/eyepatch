@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { HOME } from "./config.js";
+import { HOME, MODS_DIR } from "./config.js";
 
 /**
  * Which coding agent site-modder runs, and getting a copy of it.
@@ -29,6 +29,16 @@ const SETTINGS_FILE = path.join(HOME, "settings.json");
 const INSTALL_INFO = ".site-modder-install.json";
 
 /** Shown first in the picker; the rest are under "More agents". */
+/**
+ * Registry entries that aren't coding agents you can chat with, or are
+ * retired. Hidden from the list (reviewed against the registry, Nov 2026).
+ */
+const NOT_OFFERED: Record<string, string> = {
+  "agoragentic-acp": "an agent marketplace, not a coding agent",
+  harn: "a language for writing agent pipelines, not a coding agent",
+  kimi: "archived by Moonshot AI in favor of Kimi Code",
+};
+
 const FEATURED = ["claude-acp", "codex-acp", "gemini", "github-copilot-cli", "cursor", "opencode"];
 
 /** Id used for the agent given by SITE_MODDER_AGENT. */
@@ -56,7 +66,7 @@ type InstallProgress = {
   name: string;
   version: string;
   update: boolean;
-  phase: "downloading" | "verifying" | "extracting" | "npm";
+  phase: "downloading" | "verifying" | "extracting" | "npm" | "checking";
   received: number;
   total: number | null;
   detail: string;
@@ -148,6 +158,64 @@ async function launchForScript(file: string, args: string[], env: Record<string,
   return isNode ? { cmd: NODE, args: [file, ...args], env } : { cmd: file, args, env };
 }
 
+/** Fill in the $NODE and $DIR placeholders of a stored launch command. */
+function resolveLaunch(launch: LaunchSpec, dir: string): LaunchSpec {
+  const fill = (s: string) => (s === NODE ? process.execPath : s.startsWith(DIR) ? dir + s.slice(DIR.length) : s);
+  return { cmd: fill(launch.cmd), args: launch.args.map(fill), env: launch.env };
+}
+
+/**
+ * Start the agent and ask it for a conversation (ACP initialize, then
+ * session/new). Returns why it can't chat, or null if it can or the check was
+ * inconclusive (e.g. it needs signing in first, or is slow to start).
+ */
+function checkCanChat(spec: LaunchSpec): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(spec.cmd, spec.args, { cwd: MODS_DIR, stdio: ["pipe", "pipe", "ignore"], env: { ...process.env, ...spec.env } });
+    let settled = false;
+    const done = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      resolve(result);
+    };
+    const timer = setTimeout(() => done(null), 60_000);
+    child.on("error", () => done(null));
+    child.on("exit", () => done(null));
+    const send = (m: object) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n");
+    const NOT_FOUND = -32601;
+    let buf = "";
+    child.stdout.on("data", (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        let msg: { id?: number; error?: { code?: number } };
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (msg.id === 1) {
+          if (msg.error?.code === NOT_FOUND) return done("doesn't speak ACP");
+          if (msg.error) return done(null);
+          send({ id: 2, method: "session/new", params: { cwd: MODS_DIR, mcpServers: [] } });
+        } else if (msg.id === 2) {
+          return done(msg.error?.code === NOT_FOUND ? "can't start a conversation" : null);
+        }
+      }
+    });
+    child.stdin.on("error", () => {});
+    send({
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } },
+    });
+  });
+}
+
 export class AgentManager {
   private registry: RegistryAgent[] = [];
   private registryError: string | null = null;
@@ -188,6 +256,23 @@ export class AgentManager {
     return id && this.installed.has(id) ? id : null;
   }
 
+  installedIds(): string[] {
+    return this.custom ? [CUSTOM] : [...this.installed.keys()];
+  }
+
+  /** Delete an agent's copy. New tabs fall back to another installed agent. */
+  async remove(id: string) {
+    if (this.custom || this.installing?.id === id || !this.installed.has(id)) return;
+    this.installed.delete(id);
+    if (this.installError?.id === id) this.installError = null;
+    if (this.settings.agent === id) {
+      this.settings.agent = [...this.installed.keys()][0];
+      await this.saveSettings();
+    }
+    this.sendView();
+    await fs.rm(path.join(AGENTS_DIR, id), { recursive: true, force: true }).catch((e) => console.warn(`[agents] removing ${id}:`, e));
+  }
+
   isInstalled(id: string) {
     return id === CUSTOM ? Boolean(this.custom) : this.installed.has(id);
   }
@@ -199,10 +284,7 @@ export class AgentManager {
       return { cmd, args, env: {} };
     }
     const info = this.installed.get(id);
-    if (!info) return undefined;
-    const dir = versionDir(id, info.version);
-    const fill = (s: string) => (s === NODE ? process.execPath : s.startsWith(DIR) ? dir + s.slice(DIR.length) : s);
-    return { cmd: fill(info.launch.cmd), args: info.launch.args.map(fill), env: info.launch.env };
+    return info && resolveLaunch(info.launch, versionDir(id, info.version));
   }
 
   /** Display name from the registry. */
@@ -279,6 +361,10 @@ export class AgentManager {
     this.installError = null;
     const agent = this.registry.find((a) => a.id === id);
     if (!this.installed.has(id)) {
+      if (NOT_OFFERED[id]) {
+        this.failInstall(id, `It's ${NOT_OFFERED[id]}`);
+        return false;
+      }
       if (!agent) {
         this.failInstall(id, "That agent isn't in the registry");
         return false;
@@ -341,6 +427,13 @@ export class AgentManager {
     try {
       const launch = "binary" in how ? await this.installBinary(how.binary, tmp) : await this.installNpm(how.npx, tmp);
       const info: InstallInfo = { id: agent.id, version: agent.version, launch };
+      if (!update) {
+        // Some registry entries speak ACP but can't hold a conversation (e.g.
+        // marketplaces or tool servers). Find out before calling it installed.
+        this.progress({ phase: "checking" });
+        const problem = await checkCanChat(resolveLaunch(launch, tmp));
+        if (problem) throw new Error(`${agent.name} ${problem}, so it can't be used with site-modder`);
+      }
       await fs.writeFile(path.join(tmp, INSTALL_INFO), JSON.stringify(info, null, 2));
       await fs.rm(dest, { recursive: true, force: true });
       await fs.rename(tmp, dest);
@@ -348,6 +441,7 @@ export class AgentManager {
       console.log(`[agents] installed ${agent.id} ${agent.version}`);
     } catch (e) {
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+      await fs.rmdir(path.dirname(dest)).catch(() => {}); // only if nothing else is installed there
       throw e;
     } finally {
       this.installing = null;
@@ -435,7 +529,7 @@ export class AgentManager {
         version: a.version,
         installedVersion: inst?.version ?? null,
         kind: "binary" in how ? "download" : "npx" in how ? "npm" : null,
-        unavailable: "reason" in how ? how.reason : null,
+        unavailable: (NOT_OFFERED[a.id] ?? ("reason" in how ? how.reason : null)) as string | null,
       };
     };
     const byFeatured = (a: RegistryAgent) => {

@@ -13,12 +13,15 @@ export type FromExtension =
   | { type: "tool_result"; id: string; result?: unknown; error?: string; warning?: string }
   | { type: "set_model"; tabId: number; value: string }
   | { type: "agent_select"; tabId: number; id: string }
+  | { type: "agent_install"; id: string }
+  | { type: "agent_remove"; id: string }
+  | { type: "options_open" }
+  | { type: "options_close" }
   | { type: "agents_refresh" }
   | { type: "sync_mods" }
   | { type: "auth_start"; agentId: string; methodId: string }
   | { type: "auth_input"; agentId: string; text: string }
   | { type: "auth_cancel"; agentId: string }
-  | { type: "auth_logout"; agentId: string }
   | { type: "auth_recheck"; agentId: string };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };

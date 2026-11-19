@@ -21,6 +21,7 @@ let tabRequestSeq = 0;
 let modErrors = {}; // mod id -> registration error
 let lastMods = new Map(); // mod id -> mod, to tell CSS-only changes apart
 const panels = new Map(); // tab id -> Set of ports (that tab's side panel)
+const optionsPages = new Set(); // ports of open Options pages (setup and agents)
 
 // ---------- one side panel per tab ----------
 
@@ -69,7 +70,7 @@ async function connect() {
     await fetch(PROBE_URL, { cache: "no-store" });
   } catch {
     // Agent Bridge not running. Retry fast while a panel is open; otherwise the alarm retries.
-    if (panels.size) setTimeout(connect, 2000);
+    if (panels.size || optionsPages.size) setTimeout(connect, 2000);
     return;
   } finally {
     probing = false;
@@ -83,6 +84,7 @@ async function connect() {
     send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version, tabs });
     // Panels that are already open get their chat back.
     for (const tabId of panels.keys()) send({ type: "open_chat", tabId });
+    if (optionsPages.size) send({ type: "options_open" });
     broadcastState();
   };
   socket.onclose = () => {
@@ -116,7 +118,11 @@ function send(msg) {
 chrome.alarms.create("reconnect", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => a.name === "reconnect" && connect());
 chrome.runtime.onStartup.addListener(connect);
-chrome.runtime.onInstalled.addListener(connect);
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  connect();
+  // The Options page doubles as setup.
+  if (reason === "install") chrome.runtime.openOptionsPage();
+});
 connect();
 
 async function onBridgeMessage(msg) {
@@ -193,11 +199,33 @@ function initPanels(tabId) {
   }
 }
 
-/** Send fresh state to one tab's panel, or to every panel. */
+/** Send fresh state to one tab's panel, or to every panel (and the Options page). */
 function broadcastState(tabId) {
   const ids = tabId == null ? [...panels.keys()] : [tabId];
   for (const id of ids) for (const p of panels.get(id) ?? []) p.postMessage({ type: "state", state: state(id) });
+  if (tabId == null) for (const p of optionsPages) p.postMessage({ type: "state", state: optionsState() });
 }
+
+/** What the Options page shows: setup steps and every installed agent's sign-in. */
+function optionsState() {
+  return { connected, agents, auths: Object.fromEntries(auths), userScripts: userScriptsAvailable() };
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "options") return;
+  optionsPages.add(port);
+  connect();
+  port.postMessage({ type: "state", state: optionsState() });
+  // Agent Bridge starts the installed agents so their sign-in status shows.
+  if (optionsPages.size === 1) send({ type: "options_open" });
+  port.onDisconnect.addListener(() => {
+    optionsPages.delete(port);
+    if (!optionsPages.size) send({ type: "options_close" });
+  });
+  port.onMessage.addListener((msg) => {
+    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck"].includes(msg.type)) send(msg);
+  });
+});
 
 chrome.runtime.onConnect.addListener((port) => {
   const m = /^sidepanel:(\d+)$/.exec(port.name);
@@ -216,7 +244,6 @@ chrome.runtime.onConnect.addListener((port) => {
     panelVisible.delete(port);
   });
   port.onMessage.addListener(async (msg) => {
-    const agentId = chats.get(tabId)?.agentId;
     switch (msg.type) {
       case "prompt": {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
@@ -235,16 +262,6 @@ chrome.runtime.onConnect.addListener((port) => {
       case "set_model":
       case "agent_select":
         send({ ...msg, tabId });
-        break;
-      case "agents_refresh":
-        send(msg);
-        break;
-      case "auth_start":
-      case "auth_input":
-      case "auth_cancel":
-      case "auth_logout":
-      case "auth_recheck":
-        if (agentId) send({ ...msg, agentId });
         break;
       case "tab_response":
         tabRequests.get(msg.id)?.finish(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
@@ -356,7 +373,7 @@ function userScriptsAvailable() {
 }
 
 // Chrome has no event for the "Allow User Scripts" toggle, so check while a
-// side panel is open (that's where the banner asking for it is shown).
+// side panel or the Options page is open (both ask for it).
 let userScriptsOn = userScriptsAvailable();
 function checkUserScripts() {
   const on = userScriptsAvailable();
@@ -366,7 +383,7 @@ function checkUserScripts() {
   // Just turned on: have Agent Bridge send the mods again so they get registered.
   if (on) send({ type: "sync_mods" });
 }
-setInterval(() => panels.size && checkUserScripts(), 1000);
+setInterval(() => (panels.size || optionsPages.size) && checkUserScripts(), 1000);
 
 const USER_SCRIPTS_HELP =
   'User scripts are disabled. Open chrome://extensions, click "Details" on site-modder and turn on "Allow User Scripts".';

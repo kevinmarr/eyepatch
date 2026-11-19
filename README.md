@@ -23,9 +23,10 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄
 
 2. Load the extension: open `chrome://extensions`, turn on **Developer mode**,
    click **Load unpacked** and pick the `extension/` folder.
-3. On site-modder's **Details** page, turn on **Allow User Scripts**. Mods need it.
-4. Click the toolbar icon to open the side panel, pick a coding agent, and ask
-   for a change.
+3. Chrome opens site-modder's Options page, which doubles as setup: it checks
+   that Agent Bridge is installed, links to **Allow User Scripts** (mods need
+   it), and installs a coding agent.
+4. Click the toolbar icon to open the side panel and ask for a change.
 
 ## Tabs and chats
 
@@ -41,9 +42,9 @@ agent that no open tab uses is stopped.
 
 ## Agents
 
-The first time you open a side panel, it asks you to pick a coding agent. New
-tabs start with the agent you picked most recently.
-The list comes from the [ACP registry](https://agentclientprotocol.com/get-started/registry),
+Agents are installed and removed on the Options page (right-click the toolbar
+icon → **Options**). New tabs start with the agent you installed or picked
+most recently. The list comes from the [ACP registry](https://agentclientprotocol.com/get-started/registry),
 the same one Zed uses. Like Zed, site-modder installs its own copy of the agent
 you pick in `~/.site-modder/agents/<id>/<version>`, so it always has a version
 that works with ACP:
@@ -60,8 +61,8 @@ disk, since it includes Claude Code. Agents usually share sign-in with their
 regular install, so if you already use one you're probably signed in.
 
 To start a new chat with a different agent, open the menu on the side of
-**New chat** and pick one of your installed agents, or **Add more agents** to
-install another. The model
+**New chat** and pick one of your installed agents; **Add more agents** opens
+the Options page. The model
 menu under the message box is per tab too; the model you pick last for an
 agent is what its new chats start with.
 
@@ -72,21 +73,18 @@ panel says so.
 ## Signing in
 
 site-modder uses your agent's existing sign-in; it doesn't manage credentials.
-If you're already signed in to Claude Code, there's nothing to do.
+If you're already signed in to Claude Code or Codex, there's nothing to do.
 
-If the agent reports it's signed out, the side panel says so and offers:
+The Options page lists each installed agent with whatever account it reports
+(Claude Agent reports one; Codex doesn't) and a **Sign in again** button. Its
+sign-in options come from the agent over ACP, so this works for any ACP agent.
+Some the agent runs itself. Others are commands Agent Bridge runs, relaying the
+output (with clickable links) and a box to paste a code back. While the
+Options page is open, Agent Bridge keeps every installed agent running so they
+can report their status.
 
-- **Check again**, after you've signed in the way you normally do (for
-  example in your terminal).
-- **The agent's own sign-in options**, listed by the agent over ACP, so this
-  works for any ACP agent. Some the agent runs itself. Others are commands
-  Agent Bridge runs, relaying the output (with clickable links) and a box to
-  paste a code back. For Claude Agent these are "Claude
-  Subscription" and "Anthropic Console".
-
-Click the agent's name in the header to see the signed-in account, sign in
-another way, or sign out. Signing out signs the agent out on this computer,
-which can include using it outside site-modder.
+If an agent reports it's signed out, the side panel shows a **Sign in** button
+that opens the Options page at that agent.
 
 ## Working in the background
 

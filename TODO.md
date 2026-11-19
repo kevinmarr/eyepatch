@@ -24,20 +24,18 @@ messaging (`chrome.runtime.connectNative`):
 
 ## 2. Setup flow
 
-The flow we agreed on:
+The Options page is the setup page: Chrome opens it on install, and it has a
+checklist (Agent Bridge running, Allow User Scripts, an agent installed), the
+installed agents with sign-in, and the agent catalog. Still missing:
 
-1. Install the extension from the Chrome Web Store.
-2. `chrome.runtime.onInstalled` opens a setup page in the extension.
-3. **Install Agent Bridge:** a "Download for macOS" button (detect the OS with
-   `chrome.runtime.getPlatformInfo()`). The page retries `connectNative` until
-   it connects, then checks the step off.
-4. **Pick a coding agent:** the same picker the side panel already has.
-5. **Sign in** if the agent says it isn't, using the sign-in card the side
-   panel already has.
-6. **Allow User Scripts:** a button that opens site-modder's page in
-   `chrome://extensions`. The extension already notices when it's turned on.
-
-The side panel should show the same checklist until everything is done.
+- **Install Agent Bridge** step: a "Download for macOS" button (detect the OS
+  with `chrome.runtime.getPlatformInfo()`) on the "Install Agent Bridge"
+  step. The page retries `connectNative` until it connects.
+- **Check again** for an agent that says it's signed out after you signed in
+  elsewhere (e.g. in a terminal): today Agent Bridge only re-asks when the
+  agent restarts.
+- **Sign in again restarts the agent**, which interrupts replies in progress
+  in tabs using it. Warn, or wait until they're done.
 
 Also needed:
 
@@ -68,10 +66,10 @@ panel says so). Options:
 Only tested with the fake extension (`npm run fake-extension`), a mock-up of
 the side panel, or not at all:
 
-- A complete real sign-in and sign-out, and signing in to agents other than
-  Claude.
-- The agent picker and download in the real side panel; auto-update with
-  Claude Agent (only tested with Codex).
+- The Options page in real Chrome (only previewed with made-up data): opening
+  on install, installing and removing agents, a complete Sign in again with
+  Claude Agent and Codex, and the side panel's Sign in button opening it at
+  the right agent. Auto-update with Claude Agent (only tested with Codex).
 - The banner hiding by itself after turning on Allow User Scripts.
 - Agent Bridge on Linux and Windows (zip handling, npm paths, musl).
 

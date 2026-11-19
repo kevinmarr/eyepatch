@@ -8,7 +8,7 @@
   </head>
   <body>
     <header>
-      <button id="agent" class="agent-btn" type="button" aria-expanded="false" aria-controls="account" hidden></button>
+      <div id="agent" class="agent-name" hidden></div>
       <div class="actions">
         <button id="stop" hidden title="Stop the agent">Stop</button>
         <div id="new-wrap" class="split">
@@ -18,10 +18,11 @@
         </div>
       </div>
     </header>
-    <section id="account" class="account" hidden></section>
     <div id="banners"></div>
-    <section id="agents" class="signin" hidden></section>
-    <section id="signin" class="signin" hidden></section>
+    <section id="setup" class="setup" hidden>
+      <p>Choose a coding agent to get started.</p>
+      <button id="setup-open" type="button" class="primary">Open setup</button>
+    </section>
     <main id="log"></main>
     <form id="composer">
       <div id="page" class="page"></div>

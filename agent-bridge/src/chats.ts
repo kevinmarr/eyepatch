@@ -113,6 +113,8 @@ export class Chats {
   private agents = new Map<string, AgentProcess>();
   private permissions = new Map<string, (optionId: string | null) => void>();
   private permissionSeq = 0;
+  /** The Options page is open: keep every installed agent running so it can show their sign-in status. */
+  private optionsOpen = false;
 
   constructor(
     private readonly extension: ExtensionSocket,
@@ -177,8 +179,22 @@ export class Chats {
       case "agents_refresh":
         void this.catalog.refresh();
         break;
+      case "agent_install":
+        void this.install(msg.id);
+        break;
+      case "agent_remove":
+        void this.remove(msg.id);
+        break;
+      case "options_open":
+        this.optionsOpen = true;
+        for (const id of this.catalog.installedIds()) this.process(id)?.auth.send();
+        break;
+      case "options_close":
+        this.optionsOpen = false;
+        this.stopUnusedAgents();
+        break;
       case "auth_start":
-        void this.agents.get(msg.agentId)?.auth.start(msg.methodId);
+        void this.process(msg.agentId)?.auth.start(msg.methodId);
         break;
       case "auth_input":
         this.agents.get(msg.agentId)?.auth.input(msg.text);
@@ -189,15 +205,45 @@ export class Chats {
       case "auth_recheck": {
         // The user may have signed in outside site-modder; a fresh agent
         // process re-reads its credentials and reports status again.
-        const agent = this.agents.get(msg.agentId);
+        const agent = this.process(msg.agentId);
         if (agent && !this.busyOn(agent.id)) void agent.restart();
         break;
       }
-      case "auth_logout": {
-        const agent = this.agents.get(msg.agentId);
-        if (!agent) break;
-        void Promise.all(this.chatsOn(agent.id).map((c) => this.newSession(c.tabId))).then(() => agent.auth.logout());
-        break;
+    }
+  }
+
+  /** Install an agent from the Options page. It becomes the agent for new tabs. */
+  private async install(id: string) {
+    if (!(await this.catalog.choose(id))) return;
+    this.adoptDefault();
+    if (this.optionsOpen) this.process(id);
+  }
+
+  /** Uninstall an agent. Tabs using it end their chat and move to the default agent. */
+  private async remove(id: string) {
+    for (const chat of this.chatsOn(id)) {
+      await this.cancel(chat.tabId);
+      await this.endSession(chat);
+      chat.agentId = null;
+    }
+    this.agents.get(id)?.stop();
+    this.agents.delete(id);
+    await this.catalog.remove(id);
+    this.adoptDefault();
+  }
+
+  /** Tabs without an agent (none was installed, or theirs was removed) start using the default. */
+  private adoptDefault() {
+    const id = this.catalog.defaultId;
+    for (const chat of this.chats.values()) {
+      if (chat.agentId) continue;
+      chat.agentId = id;
+      this.extension.send({ type: "transcript", tabId: chat.tabId, events: chat.events });
+      this.sendChat(chat);
+      const agent = this.agentFor(chat);
+      if (agent) {
+        agent.auth.send();
+        if (agent.ready) void this.ensureSession(chat).catch(() => {});
       }
     }
   }
@@ -336,8 +382,12 @@ export class Chats {
 
   /** The chat's agent process, started if it isn't running. */
   private agentFor(chat: Chat): AgentProcess | undefined {
-    const id = chat.agentId;
-    if (!id || !this.catalog.isInstalled(id)) return undefined;
+    return chat.agentId ? this.process(chat.agentId) : undefined;
+  }
+
+  /** An installed agent's process, started if it isn't running. */
+  private process(id: string): AgentProcess | undefined {
+    if (!this.catalog.isInstalled(id)) return undefined;
     let agent = this.agents.get(id);
     if (!agent) {
       agent = new AgentProcess(id, {
@@ -368,10 +418,10 @@ export class Chats {
     return agent;
   }
 
-  /** Stop agent processes no tab uses anymore. */
+  /** Stop agent processes no tab uses anymore (unless the Options page is showing them). */
   private stopUnusedAgents() {
     for (const [id, agent] of this.agents) {
-      if (!this.chatsOn(id).length) {
+      if (!this.chatsOn(id).length && !(this.optionsOpen && this.catalog.isInstalled(id))) {
         agent.stop();
         this.agents.delete(id);
       }
@@ -499,13 +549,22 @@ export class Chats {
         sessionId,
         prompt: [{ type: "text", text: context + text }],
       });
+      agent.auth.markWorking();
       if (!replaced()) this.emit(chat, { type: "turn_end", stopReason: res.stopReason });
     } catch (e) {
       if (replaced()) return;
       console.error(`[${agent.id}] prompt failed:`, e);
-      const authRequired = (e as { code?: number }).code === AUTH_REQUIRED;
+      const code = (e as { code?: number }).code;
+      const authRequired = code === AUTH_REQUIRED;
       if (authRequired) agent.auth.markAuthRequired();
-      this.error(chat, authRequired ? `Sign in to ${agent.name} to continue.` : String((e as Error).message ?? e));
+      this.error(
+        chat,
+        authRequired
+          ? `Sign in to ${agent.name} to continue.`
+          : code === -32601 // method not found, e.g. no session/new
+            ? `${agent.name} can't start a conversation, so it can't be used with site-modder. Pick another agent from the New chat menu.`
+            : String((e as Error).message ?? e),
+      );
       this.emit(chat, { type: "turn_end", stopReason: "error" });
     } finally {
       if (!replaced()) {
