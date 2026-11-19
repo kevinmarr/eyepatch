@@ -1,3 +1,11 @@
+import { modApplies } from "./match.js";
+import { fillIcons, icon } from "./icons.js";
+
+fillIcons();
+// Focus rings are for keyboard use; Chrome also shows them after some clicks.
+addEventListener("pointerdown", () => document.body.classList.add("pointer"), true);
+addEventListener("keydown", (e) => e.key === "Tab" && document.body.classList.remove("pointer"), true);
+
 const $ = (id) => document.getElementById(id);
 // Each tab has its own side panel and chat; this is the tab this panel belongs to.
 const TAB_ID = Number(new URLSearchParams(location.search).get("tab"));
@@ -27,6 +35,9 @@ function connectPort() {
       setState(msg.state);
     } else if (msg.type === "event") {
       render(msg.event);
+    } else if (msg.type === "history") {
+      history = msg.items;
+      renderMoreMenu();
     }
   });
   // The service worker can restart (e.g. extension reload); reconnect.
@@ -43,7 +54,7 @@ connectPort();
 
 // ---------- header / banners ----------
 
-const CHEVRON = `<svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CHEVRON = icon("chevron-down", { cls: "chevron" });
 $("new-menu-btn").innerHTML = CHEVRON;
 
 function setState(s) {
@@ -53,8 +64,8 @@ function setState(s) {
   const hasAgent = c.connected && !c.needsAgent && (c.agent || current);
   $("agent").hidden = !hasAgent;
   if (hasAgent) {
-    const icon = current?.icon ? `<img class="agent-icon" src="${esc(current.icon)}" alt="" />` : "";
-    $("agent").innerHTML = icon + `<span>${esc(c.agent ?? current.name)}</span>`;
+    const logo = current?.icon ? `<img class="agent-icon" src="${esc(current.icon)}" alt="" />` : "";
+    $("agent").innerHTML = logo + `<span>${esc(c.agent ?? current.name)}</span>`;
   }
   const setup = c.connected && c.needsAgent;
   $("setup").hidden = !setup;
@@ -63,6 +74,7 @@ function setState(s) {
   $("new-wrap").hidden = !hasAgent;
   $("new-menu-btn").hidden = !s.agents || s.agents.custom;
   renderNewMenu();
+  renderMoreMenu();
   renderModel(s.model);
   $("send").disabled = !c.ready || c.busy || needsSignIn(s.auth);
 
@@ -95,9 +107,12 @@ $("banners").addEventListener("click", (e) => {
   if (action === "sign-in") openOptions(`#signin=${encodeURIComponent(state.bridge.agentId)}`);
 });
 
+let tabUrl = "";
 async function updatePage() {
   const tab = await chrome.tabs.get(TAB_ID).catch(() => null);
-  $("page").textContent = tab?.url ? `On: ${tab.url}` : "";
+  tabUrl = tab?.url ?? "";
+  $("page").textContent = tabUrl ? `On: ${tabUrl}` : "";
+  renderMoreMenu();
 }
 chrome.tabs.onUpdated.addListener((id, info) => id === TAB_ID && info.url && updatePage());
 updatePage();
@@ -132,6 +147,7 @@ function setNewMenu(open) {
 }
 $("new-menu-btn").addEventListener("click", (e) => {
   e.stopPropagation();
+  setMoreMenu(null);
   setNewMenu(!newMenuOpen);
 });
 document.addEventListener("click", (e) => newMenuOpen && !e.target.closest("#new-menu") && setNewMenu(false));
@@ -147,13 +163,13 @@ function renderNewMenu() {
   const installed = agents.list.filter((a) => a.installedVersion || a.id === agents.selected);
   const item = (a) => {
     const current = a.id === agents.selected;
-    const icon = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
-    const check = current ? `<svg class="check" viewBox="0 0 16 16" aria-label="Current agent"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>` : "";
-    return `<button type="button" role="menuitem" data-agent="${esc(a.id)}" >${icon}<span>${esc(a.name)}</span>${check}</button>`;
+    const logo = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
+    const check = current ? icon("check", { cls: "check", label: "Current agent" }) : "";
+    return `<button type="button" role="menuitem" data-agent="${esc(a.id)}" >${logo}<span>${esc(a.name)}</span>${check}</button>`;
   };
   el.innerHTML =
     installed.map(item).join("") +
-    `<hr /><button type="button" role="menuitem" data-action="add"><span class="plus" aria-hidden="true">+</span><span>Add more agents</span></button>`;
+    `<hr /><button type="button" role="menuitem" data-action="add">${icon("plus", { cls: "glyph" })}<span>Add more agents</span></button>`;
   el.querySelectorAll("[data-agent]").forEach((b) =>
     b.addEventListener("click", () => {
       const id = b.dataset.agent;
@@ -252,6 +268,10 @@ function render(e) {
     case "turn_end":
       breakRun();
       if (e.stopReason === "cancelled") append(div("msg note", "Stopped."));
+      break;
+    case "note":
+      breakRun();
+      append(div("msg note")).textContent = e.text;
       break;
   }
 }
@@ -363,6 +383,105 @@ function openOptions(hash = "") {
   chrome.tabs.create({ url: chrome.runtime.getURL(`options.html${hash}`) });
 }
 $("setup-open").addEventListener("click", () => openOptions());
+
+// ---------- ⋮ menu: this page's mods, past chats, settings ----------
+
+let moreView = null; // null (closed), "main" or "chats" (every past chat)
+let history = null; // past chats, newest first; fetched when the menu opens
+const RECENT = 15;
+
+function setMoreMenu(view) {
+  if (view && !moreView) port.postMessage({ type: "history_list" });
+  moreView = view;
+  renderMoreMenu();
+}
+$("more").addEventListener("click", (e) => {
+  e.stopPropagation();
+  setNewMenu(false);
+  setMoreMenu(moreView ? null : "main");
+});
+document.addEventListener("click", (e) => moreView && !e.target.closest("#more-menu") && setMoreMenu(null));
+document.addEventListener("keydown", (e) => e.key === "Escape" && moreView && setMoreMenu(null));
+
+const GEAR = icon("settings", { cls: "glyph" });
+const BACK = icon("chevron-left", { cls: "glyph" });
+const MORE = icon("chevron-right", { cls: "glyph" });
+
+const hostOf = (url) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+};
+
+function ago(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (!(s >= 0)) return "";
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function renderMoreMenu() {
+  const el = $("more-menu");
+  el.hidden = !moreView;
+  $("more").setAttribute("aria-expanded", String(Boolean(moreView)));
+  if (!moreView) return;
+  const chats = (history ?? []).filter((c) => c.sessionId !== state?.sessionId);
+  const chatItem = (c) =>
+    `<button type="button" role="menuitem" class="chat" data-session="${esc(c.sessionId)}" title="${esc([c.agent, hostOf(c.url)].filter(Boolean).join(" · "))}">` +
+    `<span class="title">${esc(c.title || "Untitled")}</span><span class="when">${esc(ago(c.updatedAt))}</span></button>`;
+
+  let html = "";
+  if (moreView === "chats") {
+    html = `<button type="button" class="back" data-action="back">${BACK}<span>All chats</span></button>` + chats.map(chatItem).join("");
+  } else {
+    const mods = (state?.mods ?? []).filter((m) => !m.error && tabUrl && modApplies(m, tabUrl));
+    if (mods.length) {
+      html += `<div class="label">On this page</div>`;
+      html += mods
+        .map(
+          (m) =>
+            `<label class="mod" title="${esc(m.description ?? "")}"><span>${esc(m.name)}</span>` +
+            `<input type="checkbox" class="switch" data-mod="${esc(m.id)}" ${m.enabled ? "checked" : ""} aria-label="${esc(m.name)}" /></label>`,
+        )
+        .join("");
+      html += "<hr />";
+    }
+    if (chats.length) {
+      // This site's chats first, then the rest; newest first within each.
+      const here = hostOf(tabUrl);
+      const recent = [...chats].sort((a, b) => (hostOf(b.url) === here) - (hostOf(a.url) === here)).slice(0, RECENT);
+      html += `<div class="label">Recent chats</div>` + recent.map(chatItem).join("");
+      if (chats.length > RECENT) html += `<button type="button" role="menuitem" class="all" data-action="all"><span>All chats</span>${MORE}</button>`;
+      html += "<hr />";
+    }
+    html += `<button type="button" role="menuitem" data-action="settings">${GEAR}<span>Settings</span></button>`;
+  }
+  el.innerHTML = html;
+}
+
+$("more-menu").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-action], [data-session]");
+  if (!t) return;
+  e.stopPropagation();
+  if (t.dataset.session) {
+    setMoreMenu(null);
+    port.postMessage({ type: "history_restore", sessionId: t.dataset.session });
+  } else if (t.dataset.action === "all") setMoreMenu("chats");
+  else if (t.dataset.action === "back") setMoreMenu("main");
+  else if (t.dataset.action === "settings") {
+    setMoreMenu(null);
+    openOptions();
+  }
+});
+$("more-menu").addEventListener("change", (e) => {
+  const id = e.target.dataset.mod;
+  if (id) port.postMessage({ type: "mod_set_enabled", id, enabled: e.target.checked });
+});
 
 // ---------- tiny, escape-first markdown ----------
 

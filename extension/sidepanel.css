@@ -58,6 +58,9 @@ button {
 }
 button:hover { border-color: var(--muted); }
 button:disabled { opacity: 0.5; cursor: default; }
+button.icon { display: flex; align-items: center; padding: 3px 4px; border-color: transparent; background: none; color: var(--muted); }
+button.icon:hover { color: var(--fg); background: var(--panel); border-color: transparent; }
+button.icon svg { width: 16px; height: 16px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .banner {
@@ -175,10 +178,27 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   text-align: left;
 }
 .menu button:hover:not(:disabled) { background: var(--panel); }
-.menu img, .menu .noicon, .menu .plus { width: 16px; height: 16px; flex: none; text-align: center; line-height: 16px; }
+.menu img, .menu .noicon { width: 16px; height: 16px; flex: none; text-align: center; line-height: 16px; }
 @media (prefers-color-scheme: dark) { .menu img { filter: invert(1); } }
 .menu .check { width: 14px; height: 14px; margin-left: auto; color: var(--accent); }
 .menu hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
+
+/* ---------- ⋮ menu: this page's mods, past chats, settings ---------- */
+.more-wrap { position: relative; display: flex; }
+.more-menu { width: 300px; max-width: calc(100vw - 24px); max-height: calc(100vh - 60px); overflow-y: auto; }
+.menu .label { padding: 6px 8px 2px; color: var(--muted); font-size: 12px; }
+.menu .mod { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.menu .mod:hover { background: var(--panel); }
+.menu .mod span, .menu .chat .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu .chat { gap: 8px; }
+.menu .chat .when { flex: none; color: var(--muted); font-size: 12px; }
+.menu .back, .menu .all { color: var(--muted); }
+.menu .all { justify-content: space-between; }
+.menu svg.glyph { width: 16px; height: 16px; flex: none; }
+.switch { appearance: none; flex: none; position: relative; width: 26px; height: 16px; margin: 0; border-radius: 8px; background: var(--border); cursor: pointer; transition: background 0.15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(10px); }
 
 /* ---------- header agent + setup ---------- */
 .agent-name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
@@ -199,3 +219,5 @@ body.blocked form#composer { display: none; }
 }
 
 [hidden] { display: none !important; }
+
+body.pointer button:focus, body.pointer select:focus, body.pointer input[type="checkbox"]:focus { outline: none; }

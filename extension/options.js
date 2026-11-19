@@ -1,12 +1,19 @@
-// Options page: setup checklist, installed agents (sign-in, remove) and the
-// agent catalog. Talks to the service worker, which relays to Agent Bridge.
+// Options page: setup checklist, installed agents (sign-in, remove), the
+// agent catalog and every mod. Talks to the service worker, which relays to Agent Bridge.
+
+import { fillIcons, icon } from "./icons.js";
+
+fillIcons();
+// Focus rings are for keyboard use; Chrome also shows them after some clicks.
+addEventListener("pointerdown", () => document.body.classList.add("pointer"), true);
+addEventListener("keydown", (e) => e.key === "Tab" && document.body.classList.remove("pointer"), true);
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-const CHECK = `<svg class="ok" viewBox="0 0 16 16" aria-label="Done"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const TRASH = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CHECK = icon("check", { cls: "ok", label: "Done" });
+const TRASH = icon("trash-2");
 
 let state = null;
 let port;
@@ -29,6 +36,7 @@ function render(s) {
   renderSetup(s);
   renderInstalled(s);
   renderAdd(s);
+  renderMods(s);
 }
 
 // ---------- setup ----------
@@ -100,7 +108,7 @@ function renderInstalled(s) {
 }
 
 function agentRow(a, auth, agents) {
-  const icon = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
+  const logo = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
   // Whatever the agent reports about the account, as it reports it.
   const account = (auth?.accounts ?? [])
     .map((x) => [x.label, x.email && x.email !== x.label ? x.email : null, x.organization].filter(Boolean).join(" · "))
@@ -113,7 +121,7 @@ function agentRow(a, auth, agents) {
   const canSignIn = auth && auth.methods.length && !busySigningIn && !showMethods;
 
   const head = `<div class="row">
-    ${icon}
+    ${logo}
     <span class="grow"><strong>${esc(a.name)}</strong>${status ? `<span class="sub">${status}</span>` : ""}</span>
     ${updating ? `<span class="muted small">Updating…</span>` : ""}
     ${canSignIn ? `<button type="button" data-do="signin">${auth.error ? "Try again" : signedOut ? "Sign in" : "Sign in again"}</button>` : ""}
@@ -242,8 +250,8 @@ function renderAdd(s) {
   if (!open) return;
 
   const item = (a) => {
-    const icon = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
-    return `<button type="button" role="menuitem" data-install="${esc(a.id)}">${icon}<span>${esc(a.name)}</span></button>`;
+    const logo = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
+    return `<button type="button" role="menuitem" data-install="${esc(a.id)}">${logo}<span>${esc(a.name)}</span></button>`;
   };
   const sorted = [...available].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   $("add-menu").innerHTML = sorted.map(item).join("");
@@ -255,3 +263,56 @@ function renderAdd(s) {
     }),
   );
 }
+
+// ---------- mods ----------
+
+/** The site a mod is for, from its first match pattern. */
+function siteOf(mod) {
+  const host = /^[^:]+:\/\/([^/]*)/.exec(mod.matches[0] ?? "")?.[1] ?? "";
+  const site = host.replace(/^\*\./, "").replace(/^www\./, "");
+  return !site || site === "*" ? "All sites" : site;
+}
+
+let modsKey = "";
+
+function renderMods(s) {
+  const mods = s.mods ?? [];
+  $("mods-section").hidden = !mods.length;
+  const key = JSON.stringify(mods);
+  if (key === modsKey) return;
+  modsKey = key;
+  const bySite = new Map();
+  for (const m of mods) {
+    const site = m.error ? "Not running" : siteOf(m);
+    if (!bySite.has(site)) bySite.set(site, []);
+    bySite.get(site).push(m);
+  }
+  const sites = [...bySite.keys()].sort((a, b) => (a === "Not running") - (b === "Not running") || a.localeCompare(b));
+  $("mods").innerHTML = sites
+    .map(
+      (site) =>
+        `<h3>${esc(site)}</h3><ul class="rows">${bySite
+          .get(site)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(
+            (m) => `<li class="row" data-mod="${esc(m.id)}">
+              <span class="grow"><strong>${esc(m.name)}</strong><span class="sub ${m.error ? "error" : ""}" title="${esc(m.error ?? m.description ?? "")}">${esc(m.error ?? m.description ?? m.id)}</span></span>
+              ${m.error ? "" : `<input type="checkbox" class="switch" data-do="toggle" ${m.enabled ? "checked" : ""} aria-label="${esc(m.name)}" />`}
+              <button type="button" class="icon" data-do="delete" aria-label="Delete ${esc(m.name)}" title="Delete">${TRASH}</button>
+            </li>`,
+          )
+          .join("")}</ul>`,
+    )
+    .join("");
+}
+
+$("mods").addEventListener("change", (e) => {
+  const id = e.target.closest("[data-mod]")?.dataset.mod;
+  if (id && e.target.dataset.do === "toggle") post({ type: "mod_set_enabled", id, enabled: e.target.checked });
+});
+$("mods").addEventListener("click", (e) => {
+  if (!e.target.closest("[data-do=delete]")) return;
+  const id = e.target.closest("[data-mod]").dataset.mod;
+  const mod = state.mods.find((m) => m.id === id);
+  if (confirm(`Delete ${mod?.name ?? id}?`)) post({ type: "mod_delete", id });
+});

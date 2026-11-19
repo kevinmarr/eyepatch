@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { MODS_DIR } from "./config.js";
+import { HOME, MODS_DIR } from "./config.js";
 
 export type Mod = {
   id: string;
@@ -61,6 +61,26 @@ export async function loadMods(): Promise<Mod[]> {
   const entries = await fsp.readdir(MODS_DIR, { withFileTypes: true });
   const ids = entries.filter((e) => e.isDirectory() && ID_RE.test(e.name)).map((e) => e.name);
   return Promise.all(ids.sort().map(loadMod));
+}
+
+function modDir(id: string) {
+  if (!ID_RE.test(id)) throw new Error(`Bad mod id ${id}`);
+  return path.join(MODS_DIR, id);
+}
+
+/** Turn a mod on or off by rewriting `enabled` in its mod.json. */
+export async function setModEnabled(id: string, enabled: boolean) {
+  const file = path.join(modDir(id), "mod.json");
+  const meta = JSON.parse(await fsp.readFile(file, "utf8"));
+  meta.enabled = enabled;
+  await fsp.writeFile(file, JSON.stringify(meta, null, 2) + "\n");
+}
+
+/** Delete a mod. Its folder moves to ~/.site-modder/trash, in case it's wanted back. */
+export async function deleteMod(id: string) {
+  const trash = path.join(HOME, "trash");
+  await fsp.mkdir(trash, { recursive: true });
+  await fsp.rename(modDir(id), path.join(trash, `${id}-${Date.now()}`));
 }
 
 /** Calls back with the ids of mods whose files changed (debounced). */
@@ -142,7 +162,7 @@ This directory (your working directory) holds every mod. Each mod is a folder:
    mod also applies to, you can verify there; otherwise stop checking and tell the
    user what you couldn't verify.
    When the request is about something a listed mod does, read and edit that mod.
-   Use the \`browser\`
+   Use the \`site-modder\`
    MCP tools (\`get_page_content\`, \`query_selector_all\`, \`screenshot\`, \`run_js\`) to
    inspect the real page before choosing selectors. Prefer stable selectors
    (ids, \`data-*\`, aria attributes) over generated class names.

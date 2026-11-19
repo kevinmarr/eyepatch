@@ -59,7 +59,16 @@ type Chat = {
   url?: string;
   /** Bumped when the tab starts a new conversation, so a turn from the old one ends quietly. */
   conversation: number;
+  /** How many events were last saved, so an unchanged chat isn't saved again. */
+  saved: number;
+  /** A saved chat to reopen when this chat's session starts. */
+  reopen?: { sessionId: string; agentId: string | null };
+  /** The saved chat this one was restored from; replaced if it continues under a new session. */
+  restoredFrom?: string;
 };
+
+/** A saved chat, as listed in the side panel. */
+type HistoryItem = { sessionId: string; agentId: string | null; agent: string | null; title: string; url: string | null; updatedAt: string };
 
 const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
@@ -126,6 +135,8 @@ export class Chats {
   private agents = new Map<string, AgentProcess>();
   private permissions = new Map<string, (optionId: string | null) => void>();
   private permissionSeq = 0;
+  /** Saved chats' summaries by file, kept until the file changes. */
+  private historyIndex = new Map<string, { mtimeMs: number; item: HistoryItem | null }>();
   /** The Options page is open: keep every installed agent running so it can show their sign-in status. */
   private optionsOpen = false;
 
@@ -180,6 +191,12 @@ export class Chats {
         break;
       case "new_session":
         void this.newSession(msg.tabId);
+        break;
+      case "history_list":
+        void this.listHistory().then((items) => this.extension.send({ type: "history", tabId: msg.tabId, items }));
+        break;
+      case "history_restore":
+        void this.restore(msg.tabId, msg.sessionId);
         break;
       case "permission_response":
         this.permissions.get(msg.id)?.(msg.optionId);
@@ -276,6 +293,7 @@ export class Chats {
         edits: new Map(),
         createdAt: Date.now(),
         conversation: 0,
+        saved: 0,
         approvals: new Map(),
         alwaysAllowed: new Set(),
       };
@@ -366,6 +384,10 @@ export class Chats {
     chat.createdAt = Date.now();
     chat.busy = false;
     chat.conversation++;
+    chat.saved = 0;
+    chat.reopen = undefined;
+    chat.restoredFrom = undefined;
+    chat.url = undefined;
   }
 
   private sendChat(chat: Chat) {
@@ -478,15 +500,21 @@ export class Chats {
       return this.extension.callWithWarning(method, { ...(args as object), tabId: chat.tabId }, options);
     });
 
-    let res: acp.NewSessionResponse;
+    let res: { sessionId: string; configOptions?: acp.SessionConfigOption[] | null; modes?: acp.SessionModeState | null } | undefined;
+    const reopen = chat.reopen;
+    chat.reopen = undefined;
     try {
-      res = await conn.agent.request(acp.methods.agent.session.new, {
+      if (reopen) res = await this.reopenSession(chat, agent, reopen, tools.server);
+      res ??= await conn.agent.request(acp.methods.agent.session.new, {
         cwd: MODS_DIR,
         mcpServers: [tools.server],
       });
     } catch (e) {
       tools.dispose();
-      if ((e as { code?: number }).code === AUTH_REQUIRED) agent.auth.markAuthRequired();
+      if ((e as { code?: number }).code === AUTH_REQUIRED) {
+        agent.auth.markAuthRequired();
+        chat.reopen ??= reopen; // try again once signed in
+      }
       throw e;
     }
     if (agent.conn !== conn || chat.agentId !== agentId) {
@@ -524,6 +552,43 @@ export class Chats {
     }
     this.sendChat(chat);
     return res.sessionId;
+  }
+
+  /**
+   * Continue a saved chat in the agent's own session, if the agent can reopen
+   * one. Otherwise (or if it fails) the chat goes on in a new session, and the
+   * agent doesn't remember the earlier messages.
+   */
+  private async reopenSession(
+    chat: Chat,
+    agent: AgentProcess,
+    saved: NonNullable<Chat["reopen"]>,
+    server: acp.McpServer,
+  ) {
+    const startsOver = (why: string) => this.emit(chat, { type: "note", text: `${why} Your next message starts a new conversation with ${agent.name}.` });
+    if (saved.agentId !== agent.id) {
+      startsOver(`${this.catalog.nameOf(saved.agentId ?? "") || "That agent"} isn't installed.`);
+      return undefined;
+    }
+    if (!agent.reopen) {
+      startsOver(`${agent.name} can't continue earlier chats.`);
+      return undefined;
+    }
+    const params = { sessionId: saved.sessionId, cwd: MODS_DIR, mcpServers: [server] };
+    try {
+      // session/load replays the conversation as updates; the session isn't
+      // registered yet, so they're dropped (the chat already shows it).
+      const r = await agent.conn!.agent.request(
+        agent.reopen === "resume" ? acp.methods.agent.session.resume : acp.methods.agent.session.load,
+        params,
+      );
+      return { ...(r ?? {}), sessionId: saved.sessionId };
+    } catch (e) {
+      if ((e as { code?: number }).code === AUTH_REQUIRED) throw e;
+      console.warn(`[${agent.id}] couldn't reopen ${saved.sessionId}:`, (e as Error).message);
+      startsOver(`${agent.name} couldn't continue this chat.`);
+      return undefined;
+    }
   }
 
   private onUpdate(chat: Chat, update: acp.SessionUpdate) {
@@ -721,9 +786,12 @@ export class Chats {
 
   // ---------- history ----------
 
-  /** Save a chat to ~/.site-modder/sessions/<session id>.json (for a future history menu). */
+  /** Save a chat to ~/.site-modder/sessions/<session id>.json. */
   private async saveHistory(chat: Chat) {
     if (!chat.sessionId || !chat.events.some((e) => e.type === "user_message")) return;
+    // Nothing new (a note about a restored chat doesn't count).
+    if (!chat.events.slice(chat.saved).some((e) => e.type !== "note")) return;
+    chat.saved = chat.events.length;
     const first = chat.events.find((e) => e.type === "user_message") as { text?: string } | undefined;
     const record = {
       sessionId: chat.sessionId,
@@ -735,7 +803,80 @@ export class Chats {
       updatedAt: new Date().toISOString(),
       events: compact(chat.events),
     };
-    const file = path.join(SESSIONS_DIR, `${chat.sessionId.replace(/[^\w.-]/g, "_")}.json`);
+    const file = historyFile(chat.sessionId);
     await fs.writeFile(file, JSON.stringify(record)).catch((e) => console.warn("[chats] couldn't save history:", e.message));
+    // A restored chat that went on in a new session replaces its old copy.
+    if (chat.restoredFrom && chat.restoredFrom !== chat.sessionId) {
+      await fs.rm(historyFile(chat.restoredFrom), { force: true });
+      chat.restoredFrom = chat.sessionId;
+    }
+  }
+
+  /** Saved chats, newest first. */
+  private async listHistory(): Promise<HistoryItem[]> {
+    const names = (await fs.readdir(SESSIONS_DIR).catch(() => [] as string[])).filter((n) => n.endsWith(".json"));
+    const items: HistoryItem[] = [];
+    for (const name of names) {
+      const file = path.join(SESSIONS_DIR, name);
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat) continue;
+      let cached = this.historyIndex.get(file);
+      if (cached?.mtimeMs !== stat.mtimeMs) {
+        const r = await readRecord(file);
+        const item = r && { sessionId: r.sessionId, agentId: r.agentId, agent: r.agent, title: r.title, url: r.url, updatedAt: r.updatedAt };
+        this.historyIndex.set(file, (cached = { mtimeMs: stat.mtimeMs, item }));
+      }
+      if (cached.item) items.push(cached.item);
+    }
+    for (const file of this.historyIndex.keys()) if (!names.includes(path.basename(file))) this.historyIndex.delete(file);
+    return items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /** Show a saved chat in this tab and continue it. Like New chat, this ends the tab's current chat. */
+  private async restore(tabId: number, sessionId: string) {
+    const record = await readRecord(historyFile(sessionId));
+    const chat = this.chat(tabId);
+    if (!record) return this.error(chat, "That chat couldn't be found.");
+    if (chat.sessionId === sessionId) return;
+    await this.cancel(tabId);
+    await this.endSession(chat);
+    if (record.agentId && this.catalog.isInstalled(record.agentId)) chat.agentId = record.agentId;
+    chat.events = record.events;
+    chat.saved = record.events.length;
+    chat.url = record.url ?? undefined;
+    chat.createdAt = Date.parse(record.createdAt) || Date.now();
+    chat.reopen = { sessionId: record.sessionId, agentId: record.agentId };
+    chat.restoredFrom = record.sessionId;
+    this.extension.send({ type: "transcript", tabId, events: chat.events });
+    this.sendChat(chat);
+    const agent = this.agentFor(chat);
+    if (agent) {
+      agent.auth.send();
+      if (agent.ready) void this.ensureSession(chat).catch((e) => this.error(chat, String((e as Error).message ?? e)));
+    }
+    this.stopUnusedAgents();
+  }
+}
+
+type SavedChat = HistoryItem & { createdAt: string; events: ChatEvent[] };
+
+const historyFile = (sessionId: string) => path.join(SESSIONS_DIR, `${sessionId.replace(/[^\w.-]/g, "_")}.json`);
+
+async function readRecord(file: string): Promise<SavedChat | null> {
+  try {
+    const r = JSON.parse(await fs.readFile(file, "utf8"));
+    if (typeof r?.sessionId !== "string" || !Array.isArray(r.events)) return null;
+    return {
+      sessionId: r.sessionId,
+      agentId: r.agentId ?? null,
+      agent: r.agent ?? null,
+      title: String(r.title ?? ""),
+      url: r.url ?? null,
+      createdAt: String(r.createdAt ?? ""),
+      updatedAt: String(r.updatedAt ?? r.createdAt ?? ""),
+      events: r.events,
+    };
+  } catch {
+    return null;
   }
 }

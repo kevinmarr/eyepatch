@@ -1,3 +1,5 @@
+import { modApplies } from "./match.js";
+
 // site-modder service worker: owns the WebSocket to Agent Bridge (the local
 // program that runs the agents), runs browser tools for them, registers mods
 // as user scripts, and relays each tab's chat between Agent Bridge and that
@@ -20,6 +22,7 @@ const tabRequests = new Map(); // id -> { tabId, event, finish }, for "switch to
 let tabRequestSeq = 0;
 let modErrors = {}; // mod id -> registration error
 let lastMods = new Map(); // mod id -> mod, to tell CSS-only changes apart
+let modList = []; // every mod, without its code (for the side panel and Options page)
 const panels = new Map(); // tab id -> Set of ports (that tab's side panel)
 const optionsPages = new Set(); // ports of open Options pages (setup and agents)
 
@@ -37,6 +40,7 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   send({ type: "close_chat", tabId });
+  forgetModsRan(tabId);
   for (const [id, r] of tabRequests) if (r.tabId === tabId) r.finish({ accepted: false, reason: "the tab was closed" });
   chats.delete(tabId);
   transcripts.delete(tabId);
@@ -47,8 +51,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Chrome clears a tab's badge when it navigates; put it back.
 // Console capture is per page load, too: start it again on each new page.
 chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === "complete") return checkModsRan(tabId);
   if (info.status !== "loading") return;
-  if (attention.has(tabId)) updateBadge(tabId);
+  if (attention.has(tabId) || modsRan.has(tabId)) updateBadge(tabId);
   if (hasChat(tabId)) startCapture(tabId);
 });
 
@@ -154,6 +159,9 @@ async function onBridgeMessage(msg) {
     case "agents":
       agents = msg.agents;
       return broadcastState();
+    case "history":
+      for (const p of panels.get(msg.tabId) ?? []) p.postMessage({ type: "history", items: msg.items });
+      return;
     case "reload_extension":
       return chrome.runtime.reload();
   }
@@ -189,6 +197,8 @@ function state(tabId) {
     agents: agents && { ...agents, selected: chat?.agentId ?? null },
     userScripts: userScriptsAvailable(),
     modErrors,
+    mods: modList,
+    sessionId: chat?.sessionId ?? null,
   };
 }
 
@@ -207,7 +217,7 @@ function broadcastState(tabId) {
 
 /** What the Options page shows: setup steps and every installed agent's sign-in. */
 function optionsState() {
-  return { connected, agents, auths: Object.fromEntries(auths), userScripts: userScriptsAvailable() };
+  return { connected, agents, auths: Object.fromEntries(auths), userScripts: userScriptsAvailable(), mods: modList };
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -222,7 +232,7 @@ chrome.runtime.onConnect.addListener((port) => {
     if (!optionsPages.size) send({ type: "options_close" });
   });
   port.onMessage.addListener((msg) => {
-    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck"].includes(msg.type)) send(msg);
+    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete"].includes(msg.type)) send(msg);
   });
 });
 
@@ -260,7 +270,18 @@ chrome.runtime.onConnect.addListener((port) => {
         break;
       case "set_model":
       case "agent_select":
+      case "history_list":
         send({ ...msg, tabId });
+        break;
+      case "history_restore": {
+        // Already open in another tab: go there instead.
+        const other = [...chats].find(([id, c]) => id !== tabId && c.sessionId === msg.sessionId)?.[0];
+        if (other != null) focusConversation(other);
+        else send({ ...msg, tabId });
+        break;
+      }
+      case "mod_set_enabled":
+        send(msg);
         break;
       case "tab_response":
         tabRequests.get(msg.id)?.finish(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
@@ -644,10 +665,19 @@ ${mod.js}
 }`;
 }
 
+/** Tells the extension the mod ran in this page, for the toolbar badge. */
+function reportCode(modId) {
+  return `(() => {
+  const report = () => chrome.runtime.sendMessage({ type: "mod_ran", id: ${JSON.stringify(modId)} }).catch(() => {});
+  report();
+  addEventListener("pageshow", (e) => e.persisted && report()); // back/forward cache
+})();`;
+}
+
 function scriptsFor(mod) {
   if (mod.error || !mod.enabled) return [];
   const common = { matches: mod.matches, excludeMatches: mod.excludeMatches ?? [] };
-  const out = [];
+  const out = [{ ...common, id: `mod:${mod.id}:ran`, js: [{ code: reportCode(mod.id) }], runAt: "document_start", world: "USER_SCRIPT" }];
   if (mod.css) {
     out.push({ ...common, id: `mod:${mod.id}:css`, js: [{ code: cssCode(mod.id, mod.css) }], runAt: "document_start", world: "USER_SCRIPT" });
   }
@@ -685,10 +715,13 @@ async function tabsMatching(mod) {
  * them), or every matching tab when that's null.
  */
 async function syncMods(mods, changed, reloadTabs = null) {
+  modList = mods.map(({ js, css, ...m }) => m);
   if (!userScriptsAvailable()) {
     broadcastState();
     return;
   }
+  // Lets mods' report scripts message the extension.
+  await chrome.userScripts.configureWorld({ messaging: true }).catch((e) => console.warn("[site-modder] configureWorld:", e));
   const existing = await chrome.userScripts.getScripts();
   const ours = existing.filter((s) => s.id.startsWith("mod:") || s.id.startsWith("sm:")).map((s) => s.id);
   if (ours.length) await chrome.userScripts.unregister({ ids: ours });
@@ -733,6 +766,11 @@ async function syncMods(mods, changed, reloadTabs = null) {
       }
     }
   }
+  if (!countedOpenTabs) {
+    countedOpenTabs = true;
+    await countModsInOpenTabs(mods);
+  }
+
   // Resolve only once changes are visible, so the agent's next tool call
   // (which Agent Bridge holds until this returns) sees the new page.
   await Promise.all([...hotSwaps, ...[...toReload].map((tabId) => reloadAndWait(tabId))]);
@@ -878,7 +916,80 @@ function updateBadge(tabId) {
   } else if (a?.unseenTurnEnd) {
     text = "✓";
     color = "#15803d";
+  } else if (modsRan.get(tabId)?.ids.size) {
+    text = String(modsRan.get(tabId).ids.size);
+    color = "#646464";
   }
   chrome.action.setBadgeText({ tabId, text }).catch(() => {});
   chrome.action.setBadgeBackgroundColor({ tabId, color }).catch(() => {});
+  chrome.action.setBadgeTextColor({ tabId, color: "#ffffff" }).catch(() => {});
+}
+
+// ---------- mods running in each tab ----------
+// Each enabled mod has a tiny script that reports when it runs in a page, so
+// the toolbar badge can count them without the extension looking at tabs.
+
+const modsRan = new Map(); // tab id -> { documentId, ids: Set of mod ids }
+
+// The service worker can restart; keep the counts across that.
+const modsRanLoaded = chrome.storage.session
+  .get("modsRan")
+  .then(({ modsRan: saved }) => {
+    for (const [tabId, r] of Object.entries(saved ?? {})) {
+      if (!modsRan.has(Number(tabId))) modsRan.set(Number(tabId), { documentId: r.documentId, ids: new Set(r.ids) });
+    }
+  })
+  .catch(() => {});
+
+function saveModsRan() {
+  const out = {};
+  for (const [tabId, r] of modsRan) out[tabId] = { documentId: r.documentId, ids: [...r.ids] };
+  chrome.storage.session.set({ modsRan: out }).catch(() => {});
+}
+
+function forgetModsRan(tabId) {
+  if (modsRan.delete(tabId)) saveModsRan();
+}
+
+chrome.runtime.onUserScriptMessage?.addListener((msg, sender) => {
+  const tabId = sender.tab?.id;
+  if (msg?.type !== "mod_ran" || typeof msg.id !== "string" || tabId == null || sender.frameId !== 0) return;
+  void modsRanLoaded.then(() => {
+    let r = modsRan.get(tabId);
+    if (!r || r.documentId !== sender.documentId) modsRan.set(tabId, (r = { documentId: sender.documentId, ids: new Set() }));
+    r.ids.add(msg.id);
+    saveModsRan();
+    updateBadge(tabId);
+  });
+});
+
+/**
+ * A tab finished loading. If it's on a new page that no mod reported from,
+ * its count is stale. Only tabs where a mod ran are checked.
+ */
+async function checkModsRan(tabId) {
+  await modsRanLoaded;
+  const r = modsRan.get(tabId);
+  if (!r) return;
+  const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: () => 0 }).catch(() => []);
+  if (res?.documentId === r.documentId) return;
+  forgetModsRan(tabId);
+  updateBadge(tabId);
+}
+
+let countedOpenTabs = false;
+
+/**
+ * Pages loaded before the extension (re)started have mods running but never
+ * reported them. Have each running mod report from the tabs it applies to.
+ */
+async function countModsInOpenTabs(mods) {
+  await modsRanLoaded;
+  for (const mod of mods) {
+    if (mod.error || !mod.enabled) continue;
+    for (const tab of await tabsMatching(mod)) {
+      if (!tab.url || !modApplies(mod, tab.url) || modsRan.get(tab.id)?.ids.has(mod.id)) continue;
+      chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: reportCode(mod.id) }] }).catch(() => {});
+    }
+  }
 }

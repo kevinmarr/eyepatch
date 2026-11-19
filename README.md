@@ -35,10 +35,16 @@ panel, and switching back shows it again with the conversation intact.
 Several tabs can have chats going at once, each with its own agent and model,
 and each agent's browser tools act only on its own tab. A chat continues if
 the tab navigates to another page. Closing the tab ends the chat; it's saved
-in `~/.site-modder/sessions/` (for a history menu later).
+in `~/.site-modder/sessions/`.
 
 Tabs using the same agent share one copy of it running in Agent Bridge. An
 agent that no open tab uses is stopped.
+
+The ⋮ menu in the side panel lists the mods for the page you're on (with an
+on/off switch each), your recent chats, and Settings. Clicking a past chat
+restores it into the tab. Agents that can reopen a conversation over ACP
+(Claude Agent and Codex do) carry on where it left off; others show the old
+chat and start a new conversation with your next message.
 
 ## Agents
 
@@ -102,7 +108,7 @@ Clicking a notification brings up that tab with its side panel open.
 
 Each tab's toolbar badge shows the same thing at a glance: `…` while its
 agent is working, `!` when it needs you, and `✓` when it has finished and you
-haven't looked yet.
+haven't looked yet. Otherwise it shows how many mods are running on the page.
 On macOS, Chrome itself needs notification permission (System Settings →
 Notifications → Google Chrome).
 
@@ -111,7 +117,9 @@ Notifications → Google Chrome).
 Each mod is a folder in `~/.site-modder/mods/<id>/` with `mod.json`, and
 optionally `mod.css` and `mod.js`. The agent's working directory is
 `~/.site-modder/mods`, and `CLAUDE.md`/`AGENTS.md` there describe the format.
-Files apply live: CSS hot-swaps in every open tab. A JS change reloads the tab
+The Options page lists every mod by site, with an on/off switch and a delete
+button (deleted mods move to `~/.site-modder/trash/`). Files apply live: CSS
+hot-swaps in every open tab. A JS change reloads the tab
 whose agent made it, not other tabs on the same site (they pick it up when they
 next load). Edits you make by hand, or with Claude Code in a terminal, reload
 every matching tab.

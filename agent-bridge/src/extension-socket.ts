@@ -19,6 +19,10 @@ export type FromExtension =
   | { type: "options_close" }
   | { type: "agents_refresh" }
   | { type: "sync_mods" }
+  | { type: "mod_set_enabled"; id: string; enabled: boolean }
+  | { type: "mod_delete"; id: string }
+  | { type: "history_list"; tabId: number }
+  | { type: "history_restore"; tabId: number; sessionId: string }
   | { type: "auth_start"; agentId: string; methodId: string }
   | { type: "auth_input"; agentId: string; text: string }
   | { type: "auth_cancel"; agentId: string }

@@ -2,7 +2,7 @@ import { AgentManager } from "./agents.js";
 import { Chats } from "./chats.js";
 import { ExtensionSocket } from "./extension-socket.js";
 import { EXTENSION_DIR, MODS_DIR, PORT } from "./config.js";
-import { ensureModsDir, loadMods, watchDir, watchMods } from "./mods.js";
+import { deleteMod, ensureModsDir, loadMods, setModEnabled, watchDir, watchMods } from "./mods.js";
 import { ToolSocket } from "./tool-socket.js";
 
 await ensureModsDir();
@@ -38,6 +38,9 @@ extension.onConnect(() => pushMods());
 // User scripts were just allowed: register every mod and reload the tabs it applies to.
 extension.on((msg) => {
   if (msg.type === "sync_mods") void loadMods().then((mods) => pushMods(mods.map((m) => m.id)));
+  // From the side panel or Options page. The mods watcher applies the change.
+  if (msg.type === "mod_set_enabled") setModEnabled(msg.id, msg.enabled).catch((e) => console.error(`[mods] ${msg.id}:`, e.message));
+  if (msg.type === "mod_delete") deleteMod(msg.id).catch((e) => console.error(`[mods] ${msg.id}:`, e.message));
 });
 watchMods((ids) => {
   console.log(`[mods] changed: ${ids.join(", ")}`);

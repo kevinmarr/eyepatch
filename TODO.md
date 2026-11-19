@@ -74,12 +74,17 @@ the side panel, or not at all:
   `userScripts`, `<all_urls>` and (after section 1) `nativeMessaging`
   permissions.
 
-## Session history
+## Mods and past chats
 
-Chats are saved to `~/.site-modder/sessions/<session id>.json` (agent, title,
-URL, events). Add a history menu to the side panel that lists them and restores
-one into the current tab, using ACP `session/load` or `session/resume` where
-the agent supports them (Claude Agent does) so the agent remembers it too.
+Verify in Chrome:
+- The toolbar badge counts the mods that ran in a tab, drops to nothing after
+  navigating to a page with none, and gives way to `…`/`!`/`✓` while an agent
+  works. Mods report through `chrome.runtime.onUserScriptMessage`, which needs
+  `userScripts.configureWorld({ messaging: true })`.
+- Toggling a mod in the ⋮ menu or on the Options page reloads its tabs.
+- Restoring a past chat. Claude Agent and Codex pick up where they left off
+  (tested without Chrome); other agents start a new conversation with the old
+  one shown.
 
 ## Later
 

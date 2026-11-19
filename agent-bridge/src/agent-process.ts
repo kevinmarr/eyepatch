@@ -30,6 +30,8 @@ export class AgentProcess {
   name: string;
   ready = false;
   conn?: acp.ClientConnection;
+  /** How the agent can reopen an earlier conversation, if at all. */
+  reopen: "resume" | "load" | null = null;
   readonly auth: AuthManager;
   private child?: ChildProcess;
   private sessions = new Map<string, SessionHandlers>();
@@ -139,6 +141,8 @@ export class AgentProcess {
     if (this.conn !== conn) return; // restarted meanwhile
     this.name = init.agentInfo?.title ?? init.agentInfo?.name ?? this.name;
     this.auth.onInitialized(init);
+    const caps = init.agentCapabilities;
+    this.reopen = caps?.sessionCapabilities?.resume ? "resume" : caps?.loadSession ? "load" : null;
     this.ready = true;
     console.log(`[${this.id}] ready: ${this.name} (protocol v${init.protocolVersion})`);
     this.deps.onReady(this);
