@@ -59,8 +59,9 @@ Copies can be large: Claude Agent is about 200 MB to download and 425 MB on
 disk, since it includes Claude Code. Agents usually share sign-in with their
 regular install, so if you already use one you're probably signed in.
 
-To switch a tab's agent, click the agent's name in the header and choose
-**Change agent**. Switching starts a new conversation in that tab. The model
+To start a new chat with a different agent, open the menu on the side of
+**New chat** and pick one of your installed agents, or **Add more agents** to
+install another. The model
 menu under the message box is per tab too; the model you pick last for an
 agent is what its new chats start with.
 

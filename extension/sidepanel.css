@@ -144,6 +144,42 @@ textarea {
 textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 #send { margin-left: auto; }
 
+/* ---------- new chat split button ---------- */
+.split { position: relative; display: flex; }
+.split #new { border-radius: 6px 0 0 6px; }
+#new-menu-btn { display: flex; align-items: center; padding: 3px 5px; margin-left: -1px; border-radius: 0 6px 6px 0; }
+#new-menu-btn .chevron { width: 12px; height: 12px; }
+.split #new:hover, #new-menu-btn:hover { position: relative; } /* hovered border on top */
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 10;
+  min-width: 200px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+}
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+}
+.menu button:hover:not(:disabled) { background: var(--panel); }
+.menu img, .menu .noicon, .menu .plus { width: 16px; height: 16px; flex: none; text-align: center; line-height: 16px; }
+@media (prefers-color-scheme: dark) { .menu img { filter: invert(1); } }
+.menu .check { width: 14px; height: 14px; margin-left: auto; color: var(--accent); }
+.menu hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
+
 /* ---------- account + sign-in ---------- */
 .agent-btn {
   display: flex;
@@ -156,8 +192,11 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   border: 1px solid transparent;
   background: none;
 }
-.agent-btn:hover { border-color: var(--border); }
+.agent-btn:hover:not(:disabled) { border-color: var(--border); }
+.agent-btn:disabled { opacity: 1; cursor: default; }
 .agent-icon { width: 16px; height: 16px; }
+.agent-btn .chevron { width: 12px; height: 12px; color: var(--muted); transition: transform 0.15s; }
+.agent-btn[aria-expanded="true"] .chevron { transform: rotate(180deg); }
 @media (prefers-color-scheme: dark) { .agent-icon { filter: invert(1); } }
 
 .account {

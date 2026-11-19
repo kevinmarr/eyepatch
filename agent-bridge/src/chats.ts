@@ -44,6 +44,8 @@ type Chat = {
   edits: Map<string, number>;
   createdAt: number;
   url?: string;
+  /** Bumped when the tab starts a new conversation, so a turn from the old one ends quietly. */
+  conversation: number;
 };
 
 const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -118,6 +120,7 @@ export class Chats {
   ) {
     extension.on((msg) => this.onMessage(msg));
     extension.onConnect(() => {
+      catalog.sendView();
       for (const agent of this.agents.values()) agent.auth.send();
     });
     // A newer copy of an agent was installed: switch to it once its chats are idle.
@@ -144,6 +147,7 @@ export class Chats {
     switch (msg.type) {
       case "hello":
         this.forgetClosedTabs(msg.tabs);
+        this.catalog.sendView();
         for (const agent of this.agents.values()) agent.auth.send();
         break;
       case "open_chat":
@@ -211,6 +215,7 @@ export class Chats {
         events: [],
         edits: new Map(),
         createdAt: Date.now(),
+        conversation: 0,
       };
       this.chats.set(tabId, chat);
     }
@@ -270,9 +275,9 @@ export class Chats {
   /** Use another agent in this tab (installing it if needed). Starts a new conversation. */
   private async setAgent(tabId: number, agentId: string) {
     const chat = this.chat(tabId);
-    if (chat.busy) return;
     if (!(await this.catalog.choose(agentId))) return;
     if (chat.agentId === agentId && chat.sessionId) return;
+    await this.cancel(tabId); // like New chat, this interrupts a reply in progress
     await this.endSession(chat);
     chat.agentId = agentId;
     this.extension.send({ type: "transcript", tabId, events: [] });
@@ -295,6 +300,8 @@ export class Chats {
     chat.events = [];
     chat.edits.clear();
     chat.createdAt = Date.now();
+    chat.busy = false;
+    chat.conversation++;
   }
 
   private sendChat(chat: Chat) {
@@ -478,6 +485,10 @@ export class Chats {
     if (agent.auth.needsSignIn) return this.error(chat, `Sign in to ${agent.name} first.`);
 
     chat.busy = true;
+    const conversation = chat.conversation;
+    // The user started a new chat (or switched agents) mid-turn: that ended
+    // this turn on purpose, so nothing about it belongs in the new chat.
+    const replaced = () => chat.conversation !== conversation;
     chat.url ??= page?.url;
     this.emit(chat, { type: "user_message", text, url: page?.url });
     this.sendChat(chat);
@@ -488,18 +499,21 @@ export class Chats {
         sessionId,
         prompt: [{ type: "text", text: context + text }],
       });
-      this.emit(chat, { type: "turn_end", stopReason: res.stopReason });
+      if (!replaced()) this.emit(chat, { type: "turn_end", stopReason: res.stopReason });
     } catch (e) {
+      if (replaced()) return;
       console.error(`[${agent.id}] prompt failed:`, e);
       const authRequired = (e as { code?: number }).code === AUTH_REQUIRED;
       if (authRequired) agent.auth.markAuthRequired();
       this.error(chat, authRequired ? `Sign in to ${agent.name} to continue.` : String((e as Error).message ?? e));
       this.emit(chat, { type: "turn_end", stopReason: "error" });
     } finally {
-      chat.busy = false;
-      this.sendChat(chat);
+      if (!replaced()) {
+        chat.busy = false;
+        this.sendChat(chat);
+        void this.saveHistory(chat);
+      }
       agent.auth.refreshIfUnknown();
-      void this.saveHistory(chat);
       if (this.pendingRestarts.has(agent.id) && !this.busyOn(agent.id)) {
         this.pendingRestarts.delete(agent.id);
         void agent.restart();

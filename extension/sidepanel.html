@@ -11,7 +11,11 @@
       <button id="agent" class="agent-btn" type="button" aria-expanded="false" aria-controls="account" hidden></button>
       <div class="actions">
         <button id="stop" hidden title="Stop the agent">Stop</button>
-        <button id="new" title="Start a new conversation">New chat</button>
+        <div id="new-wrap" class="split">
+          <button id="new" type="button">New chat</button>
+          <button id="new-menu-btn" type="button" aria-label="New chat with another agent" title="New chat with another agent" aria-haspopup="menu" aria-expanded="false" aria-controls="new-menu"></button>
+          <div id="new-menu" class="menu" role="menu" hidden></div>
+        </div>
       </div>
     </header>
     <section id="account" class="account" hidden></section>

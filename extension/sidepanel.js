@@ -43,6 +43,9 @@ connectPort();
 
 // ---------- header / banners ----------
 
+const CHEVRON = `<svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+$("new-menu-btn").innerHTML = CHEVRON;
+
 function setState(s) {
   state = s;
   const c = s.bridge;
@@ -51,10 +54,14 @@ function setState(s) {
   $("agent").hidden = !hasAgent;
   if (hasAgent) {
     const icon = current?.icon ? `<img class="agent-icon" src="${esc(current.icon)}" alt="" />` : "";
-    $("agent").innerHTML = icon + esc(c.agent ?? current.name);
+    const menu = hasAccountMenu(s.auth);
+    $("agent").innerHTML = icon + `<span>${esc(c.agent ?? current.name)}</span>` + (menu ? CHEVRON : "");
+    $("agent").disabled = !menu;
   }
   $("stop").hidden = !c.busy;
-  $("new").hidden = !hasAgent;
+  $("new-wrap").hidden = !hasAgent;
+  $("new-menu-btn").hidden = !s.agents || s.agents.custom;
+  renderNewMenu();
   renderModel(s.model);
   $("send").disabled = !c.ready || c.busy || needsSignIn(s.auth);
   renderAuth(s.auth, c);
@@ -120,6 +127,60 @@ input.addEventListener("keydown", (e) => {
 });
 $("stop").addEventListener("click", () => port.postMessage({ type: "cancel" }));
 $("new").addEventListener("click", () => port.postMessage({ type: "new_session" }));
+
+// ---------- new chat menu: start the next chat with another agent ----------
+
+let newMenuOpen = false;
+function setNewMenu(open) {
+  newMenuOpen = open;
+  renderNewMenu();
+}
+$("new-menu-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!newMenuOpen && accountOpen) {
+    accountOpen = false;
+    setState(state);
+  }
+  setNewMenu(!newMenuOpen);
+});
+document.addEventListener("click", (e) => newMenuOpen && !e.target.closest("#new-menu") && setNewMenu(false));
+document.addEventListener("keydown", (e) => e.key === "Escape" && newMenuOpen && setNewMenu(false));
+
+function renderNewMenu() {
+  const el = $("new-menu");
+  const agents = state?.agents;
+  const open = newMenuOpen && Boolean(agents) && !$("new-menu-btn").hidden && !$("new-wrap").hidden;
+  el.hidden = !open;
+  $("new-menu-btn").setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  const installing = Boolean(agents.installing && !agents.installing.update);
+  const installed = agents.list.filter((a) => a.installedVersion || a.id === agents.selected);
+  const item = (a) => {
+    const current = a.id === agents.selected;
+    const icon = a.icon ? `<img src="${esc(a.icon)}" alt="" />` : `<span class="noicon"></span>`;
+    const check = current ? `<svg class="check" viewBox="0 0 16 16" aria-label="Current agent"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>` : "";
+    return `<button type="button" role="menuitem" data-agent="${esc(a.id)}" ${installing && !current ? "disabled" : ""}>${icon}<span>${esc(a.name)}</span>${check}</button>`;
+  };
+  el.innerHTML =
+    installed.map(item).join("") +
+    `<hr /><button type="button" role="menuitem" data-action="add"><span class="plus" aria-hidden="true">+</span><span>Add more agents</span></button>`;
+  el.querySelectorAll("[data-agent]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const id = b.dataset.agent;
+      setNewMenu(false);
+      if (id === agents.selected) port.postMessage({ type: "new_session" });
+      else {
+        pickedId = id;
+        port.postMessage({ type: "agent_select", id });
+      }
+    }),
+  );
+  el.querySelector("[data-action=add]").addEventListener("click", () => {
+    newMenuOpen = false;
+    chooseAgent = true;
+    setState(state);
+  });
+}
 
 function renderModel(model) {
   const el = $("model");
@@ -413,39 +474,37 @@ function setOutput(pre, text) {
 }
 
 let accountOpen = false;
+/** Whether the agent's account menu has anything in it. */
+function hasAccountMenu(auth) {
+  return Boolean(auth && (auth.state === "authenticated" || auth.state === "not_required" || auth.methods.length || auth.canLogout));
+}
+
 $("agent").addEventListener("click", () => {
-  if (!state?.auth) return;
   accountOpen = !accountOpen;
   setState(state);
 });
 
 function renderAccount(auth, c) {
   const el = $("account");
-  const open = accountOpen && c.connected && auth && !document.body.classList.contains("signing-in");
+  const open = accountOpen && c.connected && hasAccountMenu(auth) && !document.body.classList.contains("signing-in");
   el.hidden = !open;
   $("agent").setAttribute("aria-expanded", String(Boolean(open)));
   if (!open) return;
   const lines = [];
-  if (auth.state === "authenticated") {
+  if (auth?.state === "authenticated") {
     for (const a of auth.accounts) {
       const detail = [a.email && a.email !== a.label ? a.email : null, a.organization, a.description].filter(Boolean);
       lines.push(`<div><strong>${esc(a.label)}</strong>${detail.length ? `<div class="muted small">${esc(detail.join(" · "))}</div>` : ""}</div>`);
     }
     if (!auth.accounts.length) lines.push(`<div>Signed in to ${esc(auth.agent)}.</div>`);
-  } else if (auth.state === "not_required") {
+  } else if (auth?.state === "not_required") {
     lines.push(`<div>${esc(auth.agent)} doesn't need signing in.</div>`);
   }
   const buttons = [];
-  if (state.agents && !state.agents.custom) buttons.push(`<button id="acct-agent" type="button">Change agent</button>`);
-  if (auth.methods.length) buttons.push(`<button id="acct-switch" type="button">Sign in another way</button>`);
-  if (auth.canLogout && auth.state === "authenticated") buttons.push(`<button id="acct-logout" type="button">Sign out</button>`);
+  if (auth?.methods.length) buttons.push(`<button id="acct-switch" type="button">Sign in another way</button>`);
+  if (auth?.canLogout && auth.state === "authenticated") buttons.push(`<button id="acct-logout" type="button">Sign out</button>`);
   if (buttons.length) lines.push(`<div class="row">${buttons.join("")}</div>`);
   el.innerHTML = lines.join("");
-  el.querySelector("#acct-agent")?.addEventListener("click", () => {
-    chooseAgent = true;
-    accountOpen = false;
-    setState(state);
-  });
   el.querySelector("#acct-switch")?.addEventListener("click", () => {
     forceSignIn = true;
     accountOpen = false;
@@ -486,7 +545,7 @@ function renderAgents(agents, c) {
   if (!show) return false;
 
   const parts = [
-    `<h2>${agents.selected ? "Change agent" : "Choose a coding agent"}</h2>`,
+    `<h2>${agents.selected ? "Agents" : "Choose a coding agent"}</h2>`,
   ];
   const ins = agents.installing;
   if (ins && !ins.update) {
