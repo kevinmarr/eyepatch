@@ -44,9 +44,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // Chrome clears a tab's badge when it navigates; put it back.
+// Console capture is per page load, too: start it again on each new page.
 chrome.tabs.onUpdated.addListener((tabId, info) => {
-  if (info.status === "loading" && attention.has(tabId)) updateBadge(tabId);
+  if (info.status !== "loading") return;
+  if (attention.has(tabId)) updateBadge(tabId);
+  if (hasChat(tabId)) startCapture(tabId);
 });
+
+/** Tabs with a chat (panel open, or a session from earlier). Only these are watched. */
+const hasChat = (tabId) => chats.has(tabId) || panels.has(tabId);
 
 // ---------- Agent Bridge connection ----------
 
@@ -199,6 +205,7 @@ chrome.runtime.onConnect.addListener((port) => {
   const tabId = Number(m[1]);
   if (!panels.has(tabId)) panels.set(tabId, new Set());
   panels.get(tabId).add(port);
+  startCapture(tabId);
   connect();
   port.postMessage({ type: "init", state: state(tabId), transcript: transcripts.get(tabId) ?? [] });
   // Agent Bridge sends the chat (and its history) back; it's the source of truth.
@@ -634,17 +641,18 @@ function scriptsFor(mod) {
   return out;
 }
 
-/** Capture console output from page load on every page a JS mod runs on. */
-function captureScripts(mods) {
-  const matches = [...new Set(mods.filter((m) => !m.error && m.enabled && m.js).flatMap((m) => m.matches))];
-  if (!matches.length) return [];
-  return ["USER_SCRIPT", "MAIN"].map((world) => ({
-    id: `sm:capture:${world}`,
-    matches,
-    js: [{ code: captureCode(world) }],
-    runAt: "document_start",
-    world,
-  }));
+/**
+ * Capture console output in a chat's tab (both worlds). Only chat tabs: the
+ * wrapper puts our code on the stack of every console.error, so Chrome files
+ * the page's own errors under site-modder.
+ */
+function startCapture(tabId) {
+  if (!userScriptsAvailable()) return;
+  for (const world of ["USER_SCRIPT", "MAIN"]) {
+    chrome.userScripts
+      .execute({ target: { tabId }, js: [{ code: captureCode(world) }], world, injectImmediately: true })
+      .catch(() => {}); // e.g. chrome:// pages
+  }
 }
 
 async function tabsMatching(mod) {
@@ -668,14 +676,6 @@ async function syncMods(mods, changed, reloadTabs = null) {
   const existing = await chrome.userScripts.getScripts();
   const ours = existing.filter((s) => s.id.startsWith("mod:") || s.id.startsWith("sm:")).map((s) => s.id);
   if (ours.length) await chrome.userScripts.unregister({ ids: ours });
-
-  // Registered first so capture runs before any mod on the same page.
-  try {
-    const capture = captureScripts(mods);
-    if (capture.length) await chrome.userScripts.register(capture);
-  } catch (e) {
-    console.warn("[site-modder] console capture not registered:", e);
-  }
 
   modErrors = {};
   for (const mod of mods) {
@@ -736,7 +736,7 @@ async function syncMods(mods, changed, reloadTabs = null) {
 
 const panelVisible = new Map(); // port -> whether that panel is visible
 const attention = new Map(); // tab id -> { permissions: Set, unseenTurnEnd, finalText }
-const notificationActions = new Map(); // notification id -> (buttonIndex | null) => void
+const notificationTabs = new Map(); // notification id -> tab id
 
 function attentionFor(tabId) {
   let a = attention.get(tabId);
@@ -753,9 +753,9 @@ async function userIsWatching(tabId) {
   return Boolean(win?.focused);
 }
 
-async function notify(tabId, id, { title, message, buttons = [], sticky = false, onAction }) {
+async function notify(tabId, id, { title, message, sticky = false }) {
   if (await userIsWatching(tabId)) return;
-  notificationActions.set(id, onAction ?? (() => focusConversation(tabId)));
+  notificationTabs.set(id, tabId);
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   chrome.notifications.create(id, {
     type: "basic",
@@ -763,38 +763,34 @@ async function notify(tabId, id, { title, message, buttons = [], sticky = false,
     title,
     message: message || " ",
     contextMessage: tab?.title ? clip(tab.title, 60) : undefined,
-    buttons: buttons.slice(0, 2).map((t) => ({ title: t })),
     requireInteraction: sticky,
     priority: sticky ? 2 : 0,
   });
 }
 
 function clearNotification(id) {
-  notificationActions.delete(id);
+  notificationTabs.delete(id);
   chrome.notifications.clear(id).catch(() => {});
 }
 
-/** Bring a chat's tab forward and try to open its side panel. */
-async function focusConversation(tabId) {
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab) return;
-  await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
-  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-  // Only allowed with a user gesture; a notification click may or may not count.
-  await chrome.sidePanel.open({ tabId }).catch(() => {});
+/** Bring a chat's tab forward with its side panel open. */
+function focusConversation(tabId) {
+  // sidePanel.open needs the click's user gesture, which ends at the first
+  // await, so open the panel before anything else.
+  chrome.sidePanel.setOptions({ tabId, path: `sidepanel.html?tab=${tabId}`, enabled: true });
+  chrome.sidePanel.open({ tabId }).catch((e) => console.warn("[site-modder] open panel:", e));
+  chrome.tabs
+    .update(tabId, { active: true })
+    .then((tab) => chrome.windows.update(tab.windowId, { focused: true }))
+    .catch(() => {});
 }
 
 chrome.notifications.onClicked.addListener((id) => {
-  const action = notificationActions.get(id);
+  const tabId = notificationTabs.get(id);
   clearNotification(id);
-  action?.(null);
+  if (tabId != null) focusConversation(tabId);
 });
-chrome.notifications.onButtonClicked.addListener((id, index) => {
-  const action = notificationActions.get(id);
-  clearNotification(id);
-  action?.(index);
-});
-chrome.notifications.onClosed.addListener((id) => notificationActions.delete(id));
+chrome.notifications.onClosed.addListener((id) => notificationTabs.delete(id));
 
 const clip = (s, n = 180) => {
   const t = String(s ?? "").replace(/\s+/g, " ").trim();
@@ -816,18 +812,10 @@ async function attend(tabId, event) {
     }
     case "permission_request": {
       a.permissions.add(event.id);
-      const allow = event.options.find((o) => o.kind === "allow_once");
-      const reject = event.options.find((o) => o.kind === "reject_once");
-      const choices = [allow, reject].filter(Boolean);
       await notify(tabId, `perm:${event.id}`, {
         title: "site-modder needs your permission",
         message: clip(event.toolCall?.title ?? "The agent wants to run a tool"),
-        buttons: choices.map((o) => o.name),
         sticky: true,
-        onAction: (index) => {
-          if (index == null) return focusConversation(tabId);
-          send({ type: "permission_response", id: event.id, optionId: choices[index].optionId });
-        },
       });
       break;
     }
@@ -839,10 +827,7 @@ async function attend(tabId, event) {
       await notify(tabId, `tab:${event.id}`, {
         title: "site-modder wants to see a tab",
         message: clip(`Switch back to “${event.title || event.url}” so the agent can ${event.purpose}.`),
-        buttons: ["Switch to tab", "Not now"],
         sticky: true,
-        onAction: (index) =>
-          tabRequests.get(event.id)?.finish(index === 1 ? { accepted: false, reason: "the user chose Not now" } : { accepted: true }),
       });
       break;
     case "tab_request_resolved":

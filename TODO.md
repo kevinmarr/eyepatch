@@ -71,12 +71,7 @@ OpenCode) support it.
 Only tested with the fake extension (`npm run fake-extension`), a mock-up of
 the side panel, or not at all:
 
-- Per-tab side panels (only tested with Chrome's API mocked): the panel hides
-  on other tabs and comes back with its chat; several tabs chatting at once;
-  per-tab badges; notifications naming the tab; clicking a notification opens
-  that tab's panel.
-- Switching tabs while the agent works.
-- Notifications, including their Allow/Deny and Switch/Not now buttons.
+- Per-tab toolbar badges.
 - A complete real sign-in and sign-out, and signing in to agents other than
   Claude.
 - The agent picker and download in the real side panel; auto-update with

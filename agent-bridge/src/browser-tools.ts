@@ -150,7 +150,7 @@ export function createBrowserTools(call: BrowserCall) {
       "get_console_logs",
       {
         description:
-          "Read console output and uncaught errors from the tab: messages from the page itself (world 'page') and from mods (world 'mods'). Capture runs from page load on pages that have JS mods; elsewhere it starts on the first call.",
+          "Read console output and uncaught errors from the tab: messages from the page itself (world 'page') and from mods (world 'mods'). Capture starts when each page in this tab begins loading (messages logged in the first moments of a load can be missed).",
         inputSchema: z.object({
           limit: z.number().int().positive().max(300).default(50),
           levels: z

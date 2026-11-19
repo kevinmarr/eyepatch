@@ -94,8 +94,10 @@ you're not watching a tab's panel, Chrome notifications (naming the tab) tell
 you when its agent:
 
 - finishes a turn,
-- needs permission (Allow and Deny buttons are on the notification), or
+- needs permission, or
 - needs you to switch back to a tab so it can take a screenshot.
+
+Clicking a notification brings up that tab with its side panel open.
 
 Each tab's toolbar badge shows the same thing at a glance: `…` while its
 agent is working, `!` when it needs you, and `✓` when it has finished and you
