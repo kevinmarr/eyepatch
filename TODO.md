@@ -61,17 +61,13 @@ panel says so). Options:
 - A small stdio MCP server that Agent Bridge passes to the agent as an ordinary
   MCP server and that forwards tool calls back to Agent Bridge (works for any
   agent that supports stdio MCP servers).
-- Or get MCP-over-ACP support added to codex-acp upstream.
-
-Then check which other popular agents (Gemini CLI, Copilot, Cursor,
-OpenCode) support it.
+- Or get MCP-over-ACP support added to codex-acp upstream and other agents that don't yet support MCP-over-ACP.
 
 ## 4. Test in real Chrome
 
 Only tested with the fake extension (`npm run fake-extension`), a mock-up of
 the side panel, or not at all:
 
-- Per-tab toolbar badges.
 - A complete real sign-in and sign-out, and signing in to agents other than
   Claude.
 - The agent picker and download in the real side panel; auto-update with
