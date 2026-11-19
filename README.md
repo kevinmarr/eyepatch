@@ -9,7 +9,7 @@ program, using the
 ```
 side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄ agent
                     │                          │
-            runs browser tools ◀── MCP-over-ACP ┘
+            runs browser tools ◀── MCP (stdio) ┘
             registers mods as user scripts ◀── watches ~/.site-modder/mods
 ```
 
@@ -66,9 +66,11 @@ the Options page. The model
 menu under the message box is per tab too; the model you pick last for an
 agent is what its new chats start with.
 
-The browser tools reach the agent over MCP-over-ACP. Agents that don't support
-it (Codex, for now) can still write mods but can't see the page, and the side
-panel says so.
+The browser tools reach every agent as an ordinary stdio MCP server named
+`site-modder`, which ACP requires all agents to support. The agent starts
+`agent-bridge/bin/browser-mcp.mjs` for each chat; it's only a pipe to Agent
+Bridge over a local socket (`~/.site-modder/tools-<port>.sock`, owner-only),
+with a per-chat token that ties its tool calls to that chat's tab.
 
 ## Signing in
 
@@ -137,9 +139,10 @@ every matching tab.
 ## Security notes
 
 - Page content is untrusted input to an agent that runs on your machine. File
-  edits in the mods dir are auto-accepted. Read-only browser tools run without
-  asking. `run_js`, `reload_tab`, shell commands and anything else still ask in
-  the side panel.
+  edits in the mods dir are auto-accepted. Read-only browser tools and
+  `reload_tab` run without asking. `run_js` always asks in the side panel, even with
+  agents that approve tool calls themselves (Codex); shell commands and
+  anything else ask when the agent asks.
 - The WebSocket listens on 127.0.0.1 only and rejects any Origin that isn't a
   `chrome-extension://` URL. Set `SITE_MODDER_EXTENSION_ID` to pin it to yours.
 

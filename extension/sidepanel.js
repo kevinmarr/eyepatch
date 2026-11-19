@@ -73,11 +73,6 @@ function setState(s) {
   if (hasAgent && needsSignIn(s.auth)) {
     banners.push(`${esc(s.auth.agent)} needs you to sign in.<button type="button" data-action="sign-in">Sign in</button>`);
   }
-  if (c.ready && c.browserTools === false) {
-    banners.push(
-      `${esc(c.agent)} can't see web pages, only their address.<button type="button" data-action="change-agent">Change agent</button>`,
-    );
-  }
   if (!s.userScripts) {
     banners.push(
       `Turn on <b>Allow User Scripts</b> so mods can run.<button type="button" data-action="open-settings">Open settings</button>`,
@@ -98,10 +93,6 @@ $("banners").addEventListener("click", (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   if (action === "open-settings") chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
   if (action === "sign-in") openOptions(`#signin=${encodeURIComponent(state.bridge.agentId)}`);
-  if (action === "change-agent") {
-    e.stopPropagation(); // or the click closes the menu again
-    setNewMenu(true);
-  }
 });
 
 async function updatePage() {

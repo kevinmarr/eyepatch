@@ -3,13 +3,16 @@ import { Chats } from "./chats.js";
 import { ExtensionSocket } from "./extension-socket.js";
 import { EXTENSION_DIR, MODS_DIR, PORT } from "./config.js";
 import { ensureModsDir, loadMods, watchDir, watchMods } from "./mods.js";
+import { ToolSocket } from "./tool-socket.js";
 
 await ensureModsDir();
 
 const extension = new ExtensionSocket(PORT);
 const agents = new AgentManager((msg) => extension.send(msg));
 await agents.init();
-const chats = new Chats(extension, agents);
+const tools = new ToolSocket();
+await tools.listen();
+const chats = new Chats(extension, agents, tools);
 
 /**
  * Send the mods to the extension. CSS changes hot-swap in every open tab.

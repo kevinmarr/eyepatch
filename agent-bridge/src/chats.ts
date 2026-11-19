@@ -4,7 +4,7 @@ import * as acp from "@agentclientprotocol/sdk/unstable";
 import { AgentProcess } from "./agent-process.js";
 import type { AgentManager } from "./agents.js";
 import { AUTH_REQUIRED } from "./auth.js";
-import { createBrowserTools } from "./browser-tools.js";
+import type { ToolSocket } from "./tool-socket.js";
 import { HOME, MODS_DIR } from "./config.js";
 import type { ExtensionSocket, FromExtension, PageInfo } from "./extension-socket.js";
 import { modApplies } from "./match.js";
@@ -22,11 +22,20 @@ const MAX_EVENTS = 2000;
 /** How long after an agent edits a mod its tab counts as the one that changed it. */
 const EDIT_ATTRIBUTION_MS = 120_000;
 
-const READ_ONLY_BROWSER_TOOLS = new Set(
-  ["get_tab", "get_page_content", "query_selector_all", "screenshot", "get_console_logs"].map(
-    (t) => `mcp__browser__${t}`,
-  ),
-);
+/**
+ * Browser tools that run without asking (read-only, plus reloading the tab),
+ * as agents title them when asking permission:
+ * "mcp__site-modder__get_tab" (Claude), "site-modder.get_tab", …
+ */
+const UNPROMPTED_BROWSER_TOOL =
+  /site[-_]?modder[^a-z0-9]{1,3}(get_tab|get_page_content|query_selector_all|screenshot|get_console_logs|reload_tab)($|[^a-z0-9_])/i;
+
+/** Browser tools the user approves each use of, whatever the agent's own approval settings. */
+const GUARDED_TOOLS: Record<string, string> = { run_js: "Run JavaScript in this page" };
+const guardedToolIn = (title: string) =>
+  Object.keys(GUARDED_TOOLS).find((t) => new RegExp(`site[-_]?modder[^a-z0-9]{1,3}${t}($|[^a-z0-9_])`, "i").test(title));
+/** How long a permission the agent asked for covers the tool call that follows it. */
+const APPROVAL_WINDOW_MS = 60_000;
 
 /** Something shown in a tab's chat, replayed when its side panel opens. */
 type ChatEvent = Record<string, unknown> & { type: string };
@@ -38,7 +47,11 @@ type Chat = {
   sessionStarting?: Promise<string>;
   busy: boolean;
   configOptions: acp.SessionConfigOption[];
-  browserServer?: acp.McpServerRegistration;
+  /** This conversation's route to the browser tools. */
+  browserTools?: { dispose: () => void };
+  /** Guarded tools the user just approved (tool -> when), or always allows in this chat. */
+  approvals: Map<string, number>;
+  alwaysAllowed: Set<string>;
   events: ChatEvent[];
   /** Mods this chat's agent edited, and when (for deciding which tabs to reload). */
   edits: Map<string, number>;
@@ -119,6 +132,7 @@ export class Chats {
   constructor(
     private readonly extension: ExtensionSocket,
     private readonly catalog: AgentManager,
+    private readonly toolSocket: ToolSocket,
   ) {
     extension.on((msg) => this.onMessage(msg));
     extension.onConnect(() => {
@@ -262,6 +276,8 @@ export class Chats {
         edits: new Map(),
         createdAt: Date.now(),
         conversation: 0,
+        approvals: new Map(),
+        alwaysAllowed: new Set(),
       };
       this.chats.set(tabId, chat);
     }
@@ -338,13 +354,15 @@ export class Chats {
   private async endSession(chat: Chat) {
     await this.saveHistory(chat);
     if (chat.sessionId) this.agents.get(chat.agentId ?? "")?.removeSession(chat.sessionId);
-    void chat.browserServer?.dispose();
-    chat.browserServer = undefined;
+    chat.browserTools?.dispose();
+    chat.browserTools = undefined;
     chat.sessionId = undefined;
     chat.sessionStarting = undefined;
     chat.configOptions = [];
     chat.events = [];
     chat.edits.clear();
+    chat.approvals.clear();
+    chat.alwaysAllowed.clear();
     chat.createdAt = Date.now();
     chat.busy = false;
     chat.conversation++;
@@ -361,7 +379,6 @@ export class Chats {
         ready: Boolean(agent?.ready),
         busy: chat.busy,
         sessionId: chat.sessionId ?? null,
-        browserTools: agent?.ready ? agent.supportsAcpMcp : null,
         model: this.modelView(chat),
       },
     });
@@ -402,8 +419,8 @@ export class Chats {
         onReset: (a) => {
           for (const c of this.chatsOn(a.id)) {
             this.cancelPermissions(c);
-            void c.browserServer?.dispose();
-            c.browserServer = undefined;
+            c.browserTools?.dispose();
+            c.browserTools = undefined;
             c.sessionId = undefined;
             c.sessionStarting = undefined;
             c.busy = false;
@@ -452,29 +469,32 @@ export class Chats {
     if (!agent?.ready || !conn) throw new Error("The agent is still starting. Try again in a moment.");
     const agentId = agent.id;
 
-    // Browser tools for this tab only, served over this agent's ACP connection.
-    const tools = createBrowserTools((method, args, options) =>
-      this.extension.callWithWarning(method, { ...(args as object), tabId: chat.tabId }, options),
-    );
-    const server = agent.supportsAcpMcp ? agent.mcp.registerServer(conn.agent, { name: "browser", handler: tools.handler }) : undefined;
+    // Browser tools for this tab only: a stdio MCP server the agent starts,
+    // which connects back to Agent Bridge.
+    const tools = this.toolSocket.register(async (method, args, options) => {
+      if (GUARDED_TOOLS[method] && !(await this.approveTool(chat, method, args))) {
+        throw new Error("The user declined this.");
+      }
+      return this.extension.callWithWarning(method, { ...(args as object), tabId: chat.tabId }, options);
+    });
 
     let res: acp.NewSessionResponse;
     try {
       res = await conn.agent.request(acp.methods.agent.session.new, {
         cwd: MODS_DIR,
-        mcpServers: server ? [server.declaration] : [],
+        mcpServers: [tools.server],
       });
     } catch (e) {
-      void server?.dispose();
+      tools.dispose();
       if ((e as { code?: number }).code === AUTH_REQUIRED) agent.auth.markAuthRequired();
       throw e;
     }
     if (agent.conn !== conn || chat.agentId !== agentId) {
-      void server?.dispose();
+      tools.dispose();
       throw new Error("The agent restarted");
     }
     chat.sessionId = res.sessionId;
-    chat.browserServer = server;
+    chat.browserTools = tools;
     chat.configOptions = res.configOptions ?? [];
     agent.addSession(res.sessionId, {
       onUpdate: (update) => this.onUpdate(chat, update),
@@ -638,16 +658,21 @@ export class Chats {
     signal: AbortSignal,
   ): Promise<acp.RequestPermissionResponse> {
     if (!this.extension.connected) return Promise.resolve({ outcome: { outcome: "cancelled" } });
-    // Read-only browser tools don't need a prompt. run_js and reload_tab still ask.
-    if (READ_ONLY_BROWSER_TOOLS.has(params.toolCall.title ?? "")) {
+    // Read-only browser tools and reload_tab don't need a prompt. run_js still asks.
+    if (UNPROMPTED_BROWSER_TOOL.test(params.toolCall.title ?? "")) {
       const allow = params.options.find((o) => o.kind === "allow_once");
       if (allow) return Promise.resolve({ outcome: { outcome: "selected", optionId: allow.optionId } });
     }
     const id = `p${++this.permissionSeq}`;
+    const guarded = guardedToolIn(params.toolCall.title ?? "");
     return new Promise((resolve) => {
       const done = (optionId: string | null) => {
         if (!this.permissions.has(id)) return;
         this.permissions.delete(id);
+        // Remember it so the tool call itself doesn't ask a second time.
+        const kind = params.options.find((o) => o.optionId === optionId)?.kind;
+        if (guarded && kind === "allow_once") chat.approvals.set(guarded, Date.now());
+        if (guarded && kind === "allow_always") chat.alwaysAllowed.add(guarded);
         this.emit(chat, { type: "permission_resolved", id });
         resolve(optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } });
       };
@@ -656,6 +681,36 @@ export class Chats {
       signal.addEventListener("abort", () => done(null), { once: true });
       this.emit(chat, { type: "permission_request", id, toolCall: params.toolCall, options: params.options });
     });
+  }
+
+  /**
+   * A guarded tool is about to run. Fine if the user approved it through the
+   * agent's own permission request just before (Claude asks); otherwise (e.g.
+   * Codex approves tool calls itself) ask the user here.
+   */
+  private async approveTool(chat: Chat, tool: string, args: unknown): Promise<boolean> {
+    if (chat.alwaysAllowed.has(tool)) return true;
+    const at = chat.approvals.get(tool);
+    if (at && Date.now() - at < APPROVAL_WINDOW_MS) {
+      chat.approvals.delete(tool);
+      return true;
+    }
+    const res = await this.requestPermission(
+      chat,
+      {
+        sessionId: chat.sessionId ?? "",
+        toolCall: { toolCallId: `site-modder-${++this.permissionSeq}`, title: GUARDED_TOOLS[tool], rawInput: args },
+        options: [
+          { optionId: "allow", name: "Allow", kind: "allow_once" },
+          { optionId: "always", name: "Always allow in this chat", kind: "allow_always" },
+          { optionId: "deny", name: "Deny", kind: "reject_once" },
+        ],
+      },
+      new AbortController().signal,
+    );
+    const choice = res.outcome.outcome === "selected" ? res.outcome.optionId : null;
+    if (choice === "always") chat.alwaysAllowed.add(tool);
+    return choice === "allow" || choice === "always";
   }
 
   private cancelPermissions(chat: Chat) {

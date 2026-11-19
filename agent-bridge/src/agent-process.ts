@@ -29,10 +29,8 @@ type Deps = {
 export class AgentProcess {
   name: string;
   ready = false;
-  supportsAcpMcp = false;
   conn?: acp.ClientConnection;
   readonly auth: AuthManager;
-  readonly mcp = new acp.McpOverAcpProvider();
   private child?: ChildProcess;
   private sessions = new Map<string, SessionHandlers>();
   private quickExits = 0;
@@ -121,7 +119,6 @@ export class AgentProcess {
           ? session.onPermission(params, signal)
           : Promise.resolve({ outcome: { outcome: "cancelled" as const } });
       })
-      .onRequest(acp.methods.client.mcp.message, this.mcp.handleRequest)
       .onNotification(acp.methods.client.auth.statusUpdate, ({ params }) => this.auth.onStatusUpdate(params));
 
     const conn = app.connect(stream);
@@ -141,10 +138,6 @@ export class AgentProcess {
     });
     if (this.conn !== conn) return; // restarted meanwhile
     this.name = init.agentInfo?.title ?? init.agentInfo?.name ?? this.name;
-    this.supportsAcpMcp = Boolean(init.agentCapabilities?.mcpCapabilities?.acp);
-    if (!this.supportsAcpMcp) {
-      console.warn(`[${this.id}] doesn't support MCP-over-ACP; browser tools are unavailable`);
-    }
     this.auth.onInitialized(init);
     this.ready = true;
     console.log(`[${this.id}] ready: ${this.name} (protocol v${init.protocolVersion})`);

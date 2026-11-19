@@ -13,7 +13,7 @@ let ws = null;
 let connected = false;
 let agents = null; // agent catalog and install progress, from Agent Bridge
 const auths = new Map(); // agent id -> sign-in state
-const chats = new Map(); // tab id -> { agentId, agent, ready, busy, browserTools, model, ... }
+const chats = new Map(); // tab id -> { agentId, agent, ready, busy, model, ... }
 const transcripts = new Map(); // tab id -> chat events, replayed when its panel opens
 const urlAtMessage = new Map(); // tab id -> the tab's URL when its latest message was sent
 const tabRequests = new Map(); // id -> { tabId, event, finish }, for "switch to tab" cards
@@ -183,7 +183,6 @@ function state(tabId) {
       ready: Boolean(chat?.ready),
       busy: Boolean(chat?.busy),
       needsAgent: connected && Boolean(chat) && !chat.agentId,
-      browserTools: chat?.browserTools ?? null,
     },
     auth: chat?.agentId ? (auths.get(chat.agentId) ?? null) : null,
     model: chat?.model ?? null,

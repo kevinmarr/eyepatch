@@ -16,7 +16,9 @@ messaging (`chrome.runtime.connectNative`):
 - Agent Bridge needs to become a standalone executable (no Node install), e.g.
   Node's single-executable apps or `bun build --compile`. npm-based agents are
   currently installed with the npm next to Agent Bridge's Node, so this needs
-  a plan too (bundle npm, or a Node runtime for agents, like Zed does).
+  a plan too (bundle npm, or a Node runtime for agents, like Zed does). The
+  browser tools' MCP server (`bin/browser-mcp.mjs`) is also started with
+  Agent Bridge's Node; it should become a mode of the executable instead.
 - Check that the agent keeps working with the side panel closed: an open
   native messaging port should keep the service worker alive.
 - Keep a dev mode: today Agent Bridge watches `extension/` and reloads the
@@ -50,18 +52,7 @@ Also needed:
 - **Uninstall:** removing the extension leaves Agent Bridge behind. Document
   how to remove it.
 
-## 3. Browser tools for agents without MCP-over-ACP
-
-The browser tools reach the agent through MCP-over-ACP. Claude Agent supports
-it; Codex doesn't, so Codex can write mods but can't see the page (the side
-panel says so). Options:
-
-- A small stdio MCP server that Agent Bridge passes to the agent as an ordinary
-  MCP server and that forwards tool calls back to Agent Bridge (works for any
-  agent that supports stdio MCP servers).
-- Or get MCP-over-ACP support added to codex-acp upstream and other agents that don't yet support MCP-over-ACP.
-
-## 4. Test in real Chrome
+## 3. Test in real Chrome
 
 Only tested with the fake extension (`npm run fake-extension`), a mock-up of
 the side panel, or not at all:
@@ -71,9 +62,12 @@ the side panel, or not at all:
   Claude Agent and Codex, and the side panel's Sign in button opening it at
   the right agent. Auto-update with Claude Agent (only tested with Codex).
 - The banner hiding by itself after turning on Allow User Scripts.
-- Agent Bridge on Linux and Windows (zip handling, npm paths, musl).
+- Agent Bridge on Linux and Windows (zip handling, npm paths, musl, and the
+  browser tools' socket, a named pipe on Windows).
+- Browser tools with agents other than Claude Agent and Codex (only those two
+  were tried), including whether screenshots reach the model.
 
-## 5. Chrome Web Store
+## 4. Chrome Web Store
 
 - Real icon (the current one is a placeholder).
 - Store listing, screenshots, privacy disclosures, and justifications for the
