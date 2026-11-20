@@ -382,7 +382,7 @@ function renderMods(s) {
   $("mods").innerHTML = sites
     .map((site) => {
       const broken = site === NOT_RUNNING;
-      const title = broken ? `<h3 class="group-title danger">${icon("circle-alert")}${site}</h3>` : `<h3 class="group-title">${icon("globe")}${esc(site)}</h3>`;
+      const title = broken ? `<h3 class="group-title danger">${icon("circle-alert", { size: 16 })}${site}</h3>` : `<h3 class="group-title">${icon("globe", { size: 16 })}${esc(site)}</h3>`;
       const rows = bySite
         .get(site)
         .sort((a, b) => a.name.localeCompare(b.name))

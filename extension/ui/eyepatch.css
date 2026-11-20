@@ -368,10 +368,10 @@ button.tool:hover { background: var(--surface); }
 .page-title h1 { margin: 0; font-size: 34px; line-height: 1.2; font-weight: 600; letter-spacing: -0.025em; }
 .section { display: flex; flex-direction: column; gap: 8px; }
 .section > h2 { margin: 0; font-size: 22px; line-height: 1.3; font-weight: 600; letter-spacing: -0.015em; }
-.group-title { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 19px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; }
+.group-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 1.4; font-weight: 600; }
 .group-title .icon { color: var(--text-muted); }
 .group-title.danger { color: var(--danger); }
-.group-items { display: flex; flex-direction: column; padding-left: 28px; }
+.group-items { display: flex; flex-direction: column; padding-left: 24px; } /* 16px icon + 8px gap: mods line up with the site name */
 .row { display: flex; align-items: center; gap: 16px; min-height: 64px; }
 .row.agent { min-height: 72px; }
 .row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

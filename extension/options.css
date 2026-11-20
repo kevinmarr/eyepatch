@@ -39,7 +39,7 @@
 .install-status .line span { flex: 1; min-width: 0; }
 
 /* Mods */
-.mod-groups { display: flex; flex-direction: column; gap: 28px; }
+.mod-groups { display: flex; flex-direction: column; gap: 28px; margin-top: 14px; } /* same space under "Mods" as under "Agents" */
 .mod-group { display: flex; flex-direction: column; gap: 4px; }
 .row .sub.danger { white-space: normal; }
 .row .main .sub { overflow: hidden; text-overflow: ellipsis; }

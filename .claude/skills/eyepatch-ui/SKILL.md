@@ -51,7 +51,7 @@ Geist / Geist Mono, bundled as variable fonts in `extension/ui/fonts/`
 (SIL OFL) and declared in `eyepatch.css`; never load fonts from the network. Conversation text is
 15 px / 1.6; menus, buttons and settings 14.5 px; tool rows 13.5 px; meta
 (pills, timestamps, model) 13 px; code 12 px. Page title 34 px, section 22,
-site group 19, empty-chat heading 26. Weights 400 / 500 / 600 only. Icons
+site group 16, empty-chat heading 26. Weights 400 / 500 / 600 only. Icons
 use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
 
 ## Side panel
@@ -123,7 +123,7 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
 - **Add an agent:** a `<dialog class="dialog">` with search and the full list.
   Installing shows "Downloading Claude Agent (84 MB of 199 MB)…" and a
   `.progress` bar; failures show the reason and "Try again".
-- **Mods:** grouped by site (`.group-title`, 19 px, globe icon) with
+- **Mods:** grouped by site (`.group-title`, 16 px, globe icon) with
   `.group-items` indented under the name. Each mod: name, one-line
   description, `.switch.lg`, and a trash icon button. Broken mods are listed
   first under a red "Not running" group with their error.
