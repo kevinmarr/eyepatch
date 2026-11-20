@@ -390,7 +390,9 @@ button.tool:hover { background: var(--surface); }
 .option > .icon { color: var(--text-faint); }
 /* Inline confirmation: the row turns into a gray band. */
 .confirm { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--r-xl); background: var(--surface); }
-.confirm .main { flex: 1; min-width: 0; }
+.confirm .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.confirm .name { font-size: 15px; font-weight: 500; line-height: 1.4; }
+.confirm .sub { font-size: var(--fs-ui); line-height: 1.45; color: var(--text-muted); }
 .terminal { margin: 0; padding: 12px 14px; border-radius: var(--r-lg); background: var(--code); font-family: var(--mono); font-size: var(--fs-code); line-height: var(--lh-code); color: var(--text-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .field { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); outline: none; }
 .field:focus { border-color: var(--text-faint); }
