@@ -6,9 +6,9 @@
 // themselves run in Agent Bridge (src/tool-socket.ts).
 import net from "node:net";
 
-const { SITE_MODDER_TOOLS_SOCKET: socketPath, SITE_MODDER_TOOLS_TOKEN: token } = process.env;
+const { EYEPATCH_TOOLS_SOCKET: socketPath, EYEPATCH_TOOLS_TOKEN: token } = process.env;
 if (!socketPath || !token) {
-  process.stderr.write("site-modder browser tools: missing SITE_MODDER_TOOLS_SOCKET or SITE_MODDER_TOOLS_TOKEN\n");
+  process.stderr.write("Eyepatch browser tools: missing EYEPATCH_TOOLS_SOCKET or EYEPATCH_TOOLS_TOKEN\n");
   process.exit(1);
 }
 
@@ -18,7 +18,7 @@ const socket = net.connect(socketPath, () => {
   socket.pipe(process.stdout);
 });
 socket.on("error", (e) => {
-  process.stderr.write(`site-modder browser tools: can't reach Agent Bridge (${e.message})\n`);
+  process.stderr.write(`Eyepatch browser tools: can't reach Agent Bridge (${e.message})\n`);
   process.exit(1);
 });
 socket.on("close", () => process.exit(0));

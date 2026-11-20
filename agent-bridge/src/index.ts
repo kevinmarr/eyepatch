@@ -56,7 +56,7 @@ watchDir(EXTENSION_DIR, () => {
   extension.send({ type: "reload_extension" });
 });
 
-console.log(`site-modder Agent Bridge
+console.log(`Eyepatch Agent Bridge
   websocket  ws://127.0.0.1:${PORT}
   mods       ${MODS_DIR}
   extension  ${EXTENSION_DIR} (auto-reload on change)`);

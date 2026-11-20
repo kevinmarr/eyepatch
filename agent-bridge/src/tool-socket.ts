@@ -14,9 +14,9 @@ const PROXY = fileURLToPath(new URL("../bin/browser-mcp.mjs", import.meta.url));
 
 /** Unix sockets have a short path limit (~104 bytes on macOS). */
 function socketPath() {
-  if (process.platform === "win32") return `\\\\.\\pipe\\site-modder-${os.userInfo().username}-${PORT}`;
+  if (process.platform === "win32") return `\\\\.\\pipe\\Eyepatch-${os.userInfo().username}-${PORT}`;
   const inHome = path.join(HOME, `tools-${PORT}.sock`);
-  return inHome.length < 100 ? inHome : path.join(os.tmpdir(), `site-modder-${process.getuid?.() ?? 0}-${PORT}.sock`);
+  return inHome.length < 100 ? inHome : path.join(os.tmpdir(), `eyepatch-${process.getuid?.() ?? 0}-${PORT}.sock`);
 }
 
 /**
@@ -49,12 +49,12 @@ export class ToolSocket {
     this.routes.set(token, call);
     return {
       server: {
-        name: "site-modder", // not "browser": some agents have their own tool by that name
+        name: "eyepatch", // not "browser": some agents have their own tool by that name
         command: process.execPath,
         args: [PROXY],
         env: [
-          { name: "SITE_MODDER_TOOLS_SOCKET", value: this.path },
-          { name: "SITE_MODDER_TOOLS_TOKEN", value: token },
+          { name: "EYEPATCH_TOOLS_SOCKET", value: this.path },
+          { name: "EYEPATCH_TOOLS_TOKEN", value: token },
         ],
       },
       dispose: () => this.routes.delete(token),

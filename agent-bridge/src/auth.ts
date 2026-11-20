@@ -6,7 +6,7 @@ import { MODS_DIR } from "./config.js";
 
 /**
  * Sign-in for whichever ACP agent is running, driven from the side panel.
- * site-modder doesn't manage credentials: the user's agent is expected to be
+ * Eyepatch doesn't manage credentials: the user's agent is expected to be
  * set up already. This only covers the case where the agent reports it's
  * signed out, using the agent's own sign-in methods.
  *

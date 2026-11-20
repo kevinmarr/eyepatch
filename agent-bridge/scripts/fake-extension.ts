@@ -8,7 +8,7 @@
 // auto-approves permission requests.
 import { WebSocket } from "ws";
 
-const PORT = Number(process.env.SITE_MODDER_PORT ?? 7457);
+const PORT = Number(process.env.EYEPATCH_PORT ?? 7457);
 type Tab = { tab: number; agent?: string; prompt: string };
 const tabs: Tab[] = process.env.FAKE_TABS
   ? JSON.parse(process.env.FAKE_TABS)

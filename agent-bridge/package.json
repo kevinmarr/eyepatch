@@ -1,7 +1,7 @@
 {
-  "name": "site-modder-agent-bridge",
+  "name": "eyepatch-agent-bridge",
   "version": "0.1.0",
-  "description": "Agent Bridge for the site-modder Chrome extension: runs a coding agent over ACP",
+  "description": "Agent Bridge for the Eyepatch Chrome extension: runs a coding agent over ACP",
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",

@@ -76,7 +76,7 @@ export async function setModEnabled(id: string, enabled: boolean) {
   await fsp.writeFile(file, JSON.stringify(meta, null, 2) + "\n");
 }
 
-/** Delete a mod. Its folder moves to ~/.site-modder/trash, in case it's wanted back. */
+/** Delete a mod. Its folder moves to ~/.eyepatch/trash, in case it's wanted back. */
 export async function deleteMod(id: string) {
   const trash = path.join(HOME, "trash");
   await fsp.mkdir(trash, { recursive: true });
@@ -114,9 +114,9 @@ export function watchDir(dir: string, onChange: () => void) {
   });
 }
 
-const AGENT_GUIDE = `# site-modder mods
+const AGENT_GUIDE = `# Eyepatch mods
 
-You are running inside **site-modder**, a Chrome extension. The user chats with you
+You are running inside **Eyepatch**, a Chrome extension. The user chats with you
 from the browser's side panel while looking at a web page. Your job is usually to
 change how that page looks or behaves by writing a **mod**.
 
@@ -162,7 +162,7 @@ This directory (your working directory) holds every mod. Each mod is a folder:
    mod also applies to, you can verify there; otherwise stop checking and tell the
    user what you couldn't verify.
    When the request is about something a listed mod does, read and edit that mod.
-   Use the \`site-modder\`
+   Use the \`eyepatch\`
    MCP tools (\`get_page_content\`, \`query_selector_all\`, \`screenshot\`, \`run_js\`) to
    inspect the real page before choosing selectors. Prefer stable selectors
    (ids, \`data-*\`, aria attributes) over generated class names.

@@ -1,6 +1,6 @@
 # TODO
 
-Work left before site-modder is a product other people can install. Roughly
+Work left before Eyepatch is a product other people can install. Roughly
 in order: the first two sections change the architecture the most.
 
 ## 1. Replace the WebSocket with native messaging
@@ -11,7 +11,7 @@ messaging (`chrome.runtime.connectNative`):
 
 - Chrome starts Agent Bridge on demand and talks to it over stdin/stdout.
   Nothing listens on a port.
-- A small host manifest lists site-modder's extension ID as the only one
+- A small host manifest lists Eyepatch's extension ID as the only one
   allowed to start it. That replaces the Origin check and the hardcoded port.
 - Agent Bridge needs to become a standalone executable (no Node install), e.g.
   Node's single-executable apps or `bun build --compile`. npm-based agents are
@@ -42,7 +42,7 @@ installed agents with sign-in, and the agent catalog. Still missing:
 Also needed:
 
 - **Installer** per OS: copy Agent Bridge somewhere stable (e.g.
-  `~/Library/Application Support/site-modder/`) and register the native
+  `~/Library/Application Support/Eyepatch/`) and register the native
   messaging host (a JSON file on macOS and Linux, a registry key on Windows).
 - **Code signing:** macOS blocks unsigned downloaded executables, so this needs
   an Apple Developer ID and notarization. Windows has the same issue
@@ -76,11 +76,10 @@ the side panel, or not at all:
 
 ## 5. Features and fixes
 
-- **Rename to Eyepatch everywhere:** remove every mention of site-modder in
-  the code, including the MCP server and tool names, `~/.site-modder`, the
-  `SITE_MODDER_*` env vars and the repo name.
+- **Rename the repo and folder** to `eyepatch` (the code is renamed; GitHub
+  redirects the old URL).
 - **Tidier tool names:** our browser tools show up raw in the chat (e.g.
-  `mcp__site-modder__run_js`); show them as readable titles ("Run JavaScript
+  `mcp__eyepatch__run_js`); show them as readable titles ("Run JavaScript
   in the page").
 - **Claude Agent picks API key on its own:** setting up Claude Agent never
   asks how to authenticate; it defaults to the API key, and switching to a

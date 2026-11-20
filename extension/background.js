@@ -1,6 +1,6 @@
 import { modApplies } from "./match.js";
 
-// site-modder service worker: owns the WebSocket to Agent Bridge (the local
+// Eyepatch service worker: owns the WebSocket to Agent Bridge (the local
 // program that runs the agents), runs browser tools for them, registers mods
 // as user scripts, and relays each tab's chat between Agent Bridge and that
 // tab's side panel. Every tab has its own side panel and its own chat.
@@ -35,7 +35,7 @@ chrome.sidePanel.setOptions({ enabled: false }).catch(() => {});
 chrome.action.onClicked.addListener((tab) => {
   // Both calls must happen synchronously in the click for open() to be allowed.
   chrome.sidePanel.setOptions({ tabId: tab.id, path: `sidepanel.html?tab=${tab.id}`, enabled: true });
-  chrome.sidePanel.open({ tabId: tab.id }).catch((e) => console.warn("[site-modder] open panel:", e));
+  chrome.sidePanel.open({ tabId: tab.id }).catch((e) => console.warn("[eyepatch] open panel:", e));
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -111,7 +111,7 @@ async function connect() {
     } catch {
       return;
     }
-    onBridgeMessage(msg).catch((e) => console.error("[site-modder]", e));
+    onBridgeMessage(msg).catch((e) => console.error("[eyepatch]", e));
   };
 }
 
@@ -178,7 +178,7 @@ function record(tabId, event) {
   t.push(event);
   if (t.length > MAX_TRANSCRIPT) transcripts.set(tabId, t.slice(-MAX_TRANSCRIPT));
   for (const p of panels.get(tabId) ?? []) p.postMessage({ type: "event", event });
-  attend(tabId, event).catch((e) => console.error("[site-modder] attention:", e));
+  attend(tabId, event).catch((e) => console.error("[eyepatch] attention:", e));
 }
 
 /** What a tab's side panel shows besides the chat itself. */
@@ -353,7 +353,7 @@ function requestTabSwitch(tab) {
           }
         }
       }
-      console.log(`[site-modder] tab request ${id}:`, accepted ? "switched" : reason);
+      console.log(`[eyepatch] tab request ${id}:`, accepted ? "switched" : reason);
       record(tab.id, { type: "tab_request_resolved", id, accepted, reason });
       resolve(accepted ? { ok: true } : { ok: false, reason });
     };
@@ -609,7 +609,7 @@ function reloadAndWait(tabId, timeoutMs = 15000) {
 
 // ---------- mods -> user scripts ----------
 
-const styleId = (modId) => `site-modder-${modId}`;
+const styleId = (modId) => `eyepatch-${modId}`;
 
 function cssCode(modId, css) {
   return `(() => {
@@ -695,7 +695,7 @@ function scriptsFor(mod) {
 /**
  * Capture console output in a chat's tab (both worlds). Only chat tabs: the
  * wrapper puts our code on the stack of every console.error, so Chrome files
- * the page's own errors under site-modder.
+ * the page's own errors under Eyepatch.
  */
 function startCapture(tabId) {
   if (!userScriptsAvailable()) return;
@@ -726,7 +726,7 @@ async function syncMods(mods, changed, reloadTabs = null) {
     return;
   }
   // Lets mods' report scripts message the extension.
-  await chrome.userScripts.configureWorld({ messaging: true }).catch((e) => console.warn("[site-modder] configureWorld:", e));
+  await chrome.userScripts.configureWorld({ messaging: true }).catch((e) => console.warn("[eyepatch] configureWorld:", e));
   const existing = await chrome.userScripts.getScripts();
   const ours = existing.filter((s) => s.id.startsWith("mod:") || s.id.startsWith("sm:")).map((s) => s.id);
   if (ours.length) await chrome.userScripts.unregister({ ids: ours });
@@ -837,7 +837,7 @@ function focusConversation(tabId) {
   // sidePanel.open needs the click's user gesture, which ends at the first
   // await, so open the panel before anything else.
   chrome.sidePanel.setOptions({ tabId, path: `sidepanel.html?tab=${tabId}`, enabled: true });
-  chrome.sidePanel.open({ tabId }).catch((e) => console.warn("[site-modder] open panel:", e));
+  chrome.sidePanel.open({ tabId }).catch((e) => console.warn("[eyepatch] open panel:", e));
   chrome.tabs
     .update(tabId, { active: true })
     .then((tab) => chrome.windows.update(tab.windowId, { focused: true }))

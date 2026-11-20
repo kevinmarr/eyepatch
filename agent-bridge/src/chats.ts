@@ -13,7 +13,7 @@ import { loadMods, type Mod } from "./mods.js";
 /**
  * One chat per browser tab. Each chat has its own agent (tabs can use
  * different agents) and its own ACP session; tabs using the same agent share
- * one agent process. Chats are saved to ~/.site-modder/sessions so they can
+ * one agent process. Chats are saved to ~/.eyepatch/sessions so they can
  * be restored later.
  */
 
@@ -25,15 +25,15 @@ const EDIT_ATTRIBUTION_MS = 120_000;
 /**
  * Browser tools that run without asking (read-only, plus reloading the tab),
  * as agents title them when asking permission:
- * "mcp__site-modder__get_tab" (Claude), "site-modder.get_tab", …
+ * "mcp__eyepatch__get_tab" (Claude), "eyepatch.get_tab", …
  */
 const UNPROMPTED_BROWSER_TOOL =
-  /site[-_]?modder[^a-z0-9]{1,3}(get_tab|get_page_content|query_selector_all|screenshot|get_console_logs|reload_tab)($|[^a-z0-9_])/i;
+  /eyepatch[^a-z0-9]{1,3}(get_tab|get_page_content|query_selector_all|screenshot|get_console_logs|reload_tab)($|[^a-z0-9_])/i;
 
 /** Browser tools the user approves each use of, whatever the agent's own approval settings. */
 const GUARDED_TOOLS: Record<string, string> = { run_js: "Run JavaScript in this page" };
 const guardedToolIn = (title: string) =>
-  Object.keys(GUARDED_TOOLS).find((t) => new RegExp(`site[-_]?modder[^a-z0-9]{1,3}${t}($|[^a-z0-9_])`, "i").test(title));
+  Object.keys(GUARDED_TOOLS).find((t) => new RegExp(`eyepatch[^a-z0-9]{1,3}${t}($|[^a-z0-9_])`, "i").test(title));
 /** How long a permission the agent asked for covers the tool call that follows it. */
 const APPROVAL_WINDOW_MS = 60_000;
 
@@ -234,7 +234,7 @@ export class Chats {
         this.agents.get(msg.agentId)?.auth.cancel();
         break;
       case "auth_recheck": {
-        // The user may have signed in outside site-modder; a fresh agent
+        // The user may have signed in outside Eyepatch; a fresh agent
         // process re-reads its credentials and reports status again.
         const agent = this.process(msg.agentId);
         if (agent && !this.busyOn(agent.id)) void agent.restart();
@@ -648,7 +648,7 @@ export class Chats {
         authRequired
           ? `Authenticate ${agent.name} to continue.`
           : code === -32601 // method not found, e.g. no session/new
-            ? `${agent.name} can't start a conversation, so it can't be used with site-modder. Pick another agent from the New chat menu.`
+            ? `${agent.name} can't start a conversation, so it can't be used with Eyepatch. Pick another agent from the New chat menu.`
             : String((e as Error).message ?? e),
       );
       this.emit(chat, { type: "turn_end", stopReason: "error" });
@@ -766,7 +766,7 @@ export class Chats {
       chat,
       {
         sessionId: chat.sessionId ?? "",
-        toolCall: { toolCallId: `site-modder-${++this.permissionSeq}`, title: GUARDED_TOOLS[tool], rawInput: args },
+        toolCall: { toolCallId: `eyepatch-${++this.permissionSeq}`, title: GUARDED_TOOLS[tool], rawInput: args },
         options: [
           { optionId: "allow", name: "Allow", kind: "allow_once" },
           { optionId: "always", name: "Always allow in this chat", kind: "allow_always" },
@@ -788,7 +788,7 @@ export class Chats {
 
   // ---------- history ----------
 
-  /** Save a chat to ~/.site-modder/sessions/<session id>.json. */
+  /** Save a chat to ~/.eyepatch/sessions/<session id>.json. */
   private async saveHistory(chat: Chat) {
     if (!chat.sessionId || !chat.events.some((e) => e.type === "user_message")) return;
     // Nothing new (a note about a restored chat doesn't count).

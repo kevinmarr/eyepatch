@@ -63,7 +63,7 @@ async function browser<T>(
  * belongs to (even if the user has since switched tabs).
  */
 export function createBrowserServer(call: BrowserCall): McpServer {
-  const server = new McpServer({ name: "site-modder", version: "0.1.0" });
+  const server = new McpServer({ name: "eyepatch", version: "0.1.0" });
 
   server.registerTool(
     "get_tab",

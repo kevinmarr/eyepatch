@@ -111,7 +111,7 @@ export class AgentProcess {
     );
 
     const app = acp
-      .client({ name: "site-modder" })
+      .client({ name: "eyepatch" })
       .onNotification(acp.methods.client.session.update, ({ params }) =>
         this.sessions.get(params.sessionId)?.onUpdate(params.update),
       )
@@ -136,7 +136,7 @@ export class AgentProcess {
         auth: { terminal: true },
         _meta: { "terminal-auth": true },
       },
-      clientInfo: { name: "site-modder", version: "0.1.0" },
+      clientInfo: { name: "eyepatch", version: "0.1.0" },
     });
     if (this.conn !== conn) return; // restarted meanwhile
     this.name = init.agentInfo?.title ?? init.agentInfo?.name ?? this.name;

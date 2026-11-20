@@ -1,4 +1,4 @@
-# site-modder (Eyepatch)
+# Eyepatch
 
 Modify any website by chatting with a coding agent from Chrome's side panel.
 The agent (Claude, Codex, Gemini CLI or any other ACP agent) runs on your
@@ -10,7 +10,7 @@ program, using the
 side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄ agent
                     │                          │
             runs browser tools ◀── MCP (stdio) ┘
-            registers mods as user scripts ◀── watches ~/.site-modder/mods
+            registers mods as user scripts ◀── watches ~/.eyepatch/mods
 ```
 
 ## Setup
@@ -23,7 +23,7 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄
 
 2. Load the extension: open `chrome://extensions`, turn on **Developer mode**,
    click **Load unpacked** and pick the `extension/` folder.
-3. Chrome opens site-modder's Options page, which doubles as setup: it checks
+3. Chrome opens Eyepatch's Settings page, which doubles as setup: it checks
    that Agent Bridge is installed, links to **Allow User Scripts** (mods need
    it), and installs a coding agent.
 4. Click the toolbar icon to open the side panel and ask for a change.
@@ -35,7 +35,7 @@ panel, and switching back shows it again with the conversation intact.
 Several tabs can have chats going at once, each with its own agent and model,
 and each agent's browser tools act only on its own tab. A chat continues if
 the tab navigates to another page. Closing the tab ends the chat; it's saved
-in `~/.site-modder/sessions/`.
+in `~/.eyepatch/sessions/`.
 
 Tabs using the same agent share one copy of it running in Agent Bridge. An
 agent that no open tab uses is stopped.
@@ -51,8 +51,8 @@ chat and start a new conversation with your next message.
 Agents are installed and removed on the Options page (right-click the toolbar
 icon → **Options**). New tabs start with the agent you installed or picked
 most recently. The list comes from the [ACP registry](https://agentclientprotocol.com/get-started/registry),
-the same one Zed uses. Like Zed, site-modder installs its own copy of the agent
-you pick in `~/.site-modder/agents/<id>/<version>`, so it always has a version
+the same one Zed uses. Like Zed, Eyepatch installs its own copy of the agent
+you pick in `~/.eyepatch/agents/<id>/<version>`, so it always has a version
 that works with ACP:
 
 - Agents published as downloads (Claude Agent, Cursor, OpenCode, …) are
@@ -73,14 +73,14 @@ menu under the message box is per tab too; the model you pick last for an
 agent is what its new chats start with.
 
 The browser tools reach every agent as an ordinary stdio MCP server named
-`site-modder`, which ACP requires all agents to support. The agent starts
+`eyepatch`, which ACP requires all agents to support. The agent starts
 `agent-bridge/bin/browser-mcp.mjs` for each chat; it's only a pipe to Agent
-Bridge over a local socket (`~/.site-modder/tools-<port>.sock`, owner-only),
+Bridge over a local socket (`~/.eyepatch/tools-<port>.sock`, owner-only),
 with a per-chat token that ties its tool calls to that chat's tab.
 
 ## Signing in
 
-site-modder uses your agent's existing sign-in; it doesn't manage credentials.
+Eyepatch uses your agent's existing sign-in; it doesn't manage credentials.
 If you're already signed in to Claude Code or Codex, there's nothing to do.
 
 The Options page lists each installed agent with whatever account it reports
@@ -115,11 +115,11 @@ Notifications → Google Chrome).
 
 ## Mods
 
-Each mod is a folder in `~/.site-modder/mods/<id>/` with `mod.json`, and
+Each mod is a folder in `~/.eyepatch/mods/<id>/` with `mod.json`, and
 optionally `mod.css` and `mod.js`. The agent's working directory is
-`~/.site-modder/mods`, and `CLAUDE.md`/`AGENTS.md` there describe the format.
+`~/.eyepatch/mods`, and `CLAUDE.md`/`AGENTS.md` there describe the format.
 The Options page lists every mod by site, with an on/off switch and a delete
-button (deleted mods move to `~/.site-modder/trash/`). Files apply live: CSS
+button (deleted mods move to `~/.eyepatch/trash/`). Files apply live: CSS
 hot-swaps in every open tab. A JS change reloads the tab
 whose agent made it, not other tabs on the same site (they pick it up when they
 next load). Edits you make by hand, or with Claude Code in a terminal, reload
@@ -147,10 +147,10 @@ every matching tab.
 
 | Var | Default | |
 | --- | --- | --- |
-| `SITE_MODDER_PORT` | `7457` | The extension currently hardcodes 7457 |
-| `SITE_MODDER_HOME` | `~/.site-modder` | Mods live in `$HOME/mods` |
-| `SITE_MODDER_AGENT` | the agent picked in the side panel | Run this ACP agent command instead, e.g. `gemini --acp` |
-| `SITE_MODDER_EXTENSION_ID` | any extension | Only accept connections from this extension ID |
+| `EYEPATCH_PORT` | `7457` | The extension currently hardcodes 7457 |
+| `EYEPATCH_HOME` | `~/.eyepatch` | Mods live in `$HOME/mods` |
+| `EYEPATCH_AGENT` | the agent picked in the side panel | Run this ACP agent command instead, e.g. `gemini --acp` |
+| `EYEPATCH_EXTENSION_ID` | any extension | Only accept connections from this extension ID |
 
 ## Security notes
 
@@ -160,7 +160,7 @@ every matching tab.
   agents that approve tool calls themselves (Codex); shell commands and
   anything else ask when the agent asks.
 - The WebSocket listens on 127.0.0.1 only and rejects any Origin that isn't a
-  `chrome-extension://` URL. Set `SITE_MODDER_EXTENSION_ID` to pin it to yours.
+  `chrome-extension://` URL. Set `EYEPATCH_EXTENSION_ID` to pin it to yours.
 
 ## License
 

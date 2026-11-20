@@ -9,24 +9,24 @@ import { pipeline } from "node:stream/promises";
 import { HOME, MODS_DIR } from "./config.js";
 
 /**
- * Which coding agent site-modder runs, and getting a copy of it.
+ * Which coding agent Eyepatch runs, and getting a copy of it.
  *
  * Like Zed, we use the ACP registry (https://agentclientprotocol.com) as the
  * catalog and install a managed copy of the chosen agent under
- * ~/.site-modder/agents/<id>/<version>. Registry entries are either a
+ * ~/.eyepatch/agents/<id>/<version>. Registry entries are either a
  * per-platform archive (downloaded and checked against its sha256) or an npm
  * package (installed with the npm that came with Agent Bridge's Node).
  * When the registry lists a newer version, it's installed in the background
  * and used the next time the agent starts.
  *
- * SITE_MODDER_AGENT="cmd args..." overrides all of this with a custom command.
+ * EYEPATCH_AGENT="cmd args..." overrides all of this with a custom command.
  */
 
 const REGISTRY_URL = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 const AGENTS_DIR = path.join(HOME, "agents");
 const REGISTRY_CACHE = path.join(HOME, "registry.json");
 const SETTINGS_FILE = path.join(HOME, "settings.json");
-const INSTALL_INFO = ".site-modder-install.json";
+const INSTALL_INFO = ".eyepatch-install.json";
 
 /** Shown first in the picker; the rest are under "More agents". */
 /**
@@ -41,7 +41,7 @@ const NOT_OFFERED: Record<string, string> = {
 
 const FEATURED = ["claude-acp", "codex-acp", "gemini", "github-copilot-cli", "cursor", "opencode"];
 
-/** Id used for the agent given by SITE_MODDER_AGENT. */
+/** Id used for the agent given by EYEPATCH_AGENT. */
 export const CUSTOM = "custom";
 
 export type LaunchSpec = { cmd: string; args: string[]; env: Record<string, string> };
@@ -93,7 +93,7 @@ function howToInstall(agent: RegistryAgent): { binary: BinaryTarget } | { npx: N
   const binary = key ? agent.distribution.binary?.[key] : undefined;
   if (binary) return { binary };
   if (agent.distribution.npx) return { npx: agent.distribution.npx };
-  if (agent.distribution.uvx) return { reason: "Needs Python (uv), which site-modder doesn't install yet" };
+  if (agent.distribution.uvx) return { reason: "Needs Python (uv), which Eyepatch doesn't install yet" };
   return { reason: "Not available for this computer" };
 }
 
@@ -146,7 +146,7 @@ async function npmBin(dir: string, pkgSpec: string): Promise<string> {
 /**
  * Placeholders in a saved launch command, filled in at launch: Agent Bridge's
  * own Node (its path changes with Node upgrades, e.g. nvm) and the agent's
- * install folder (so ~/.site-modder can move).
+ * install folder (so ~/.eyepatch can move).
  */
 const NODE = "$NODE";
 const DIR = "$DIR";
@@ -223,7 +223,7 @@ export class AgentManager {
   private installed = new Map<string, InstallInfo>(); // id -> newest installed copy
   private installing: InstallProgress | null = null;
   private installError: { id: string; message: string } | null = null;
-  private readonly custom = process.env.SITE_MODDER_AGENT?.trim() || null;
+  private readonly custom = process.env.EYEPATCH_AGENT?.trim() || null;
   private updateListeners: Array<(id: string) => void> = [];
 
   constructor(private readonly send: (msg: Record<string, unknown>) => void) {}
@@ -432,7 +432,7 @@ export class AgentManager {
         // marketplaces or tool servers). Find out before calling it installed.
         this.progress({ phase: "checking" });
         const problem = await checkCanChat(resolveLaunch(launch, tmp));
-        if (problem) throw new Error(`${agent.name} ${problem}, so it can't be used with site-modder`);
+        if (problem) throw new Error(`${agent.name} ${problem}, so it can't be used with Eyepatch`);
       }
       await fs.writeFile(path.join(tmp, INSTALL_INFO), JSON.stringify(info, null, 2));
       await fs.rm(dest, { recursive: true, force: true });
