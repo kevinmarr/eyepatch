@@ -75,7 +75,7 @@ function renderSetup(s) {
   const html = steps
     .map((x, i) =>
       x.done
-        ? `<li class="done">${icon("circle-check", { size: 24 })}<div class="main"><span class="name">${x.name}</span></div></li>`
+        ? `<li class="done"><span class="step-done">${icon("circle-check", { size: 18 })}</span><div class="main"><span class="name">${x.name}</span></div></li>`
         : `<li><span class="step">${i + 1}</span><div class="main"><span class="name">${x.todo}</span>${bodies[i]}</div></li>`,
     )
     .join("");

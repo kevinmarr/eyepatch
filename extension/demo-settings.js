@@ -1,5 +1,6 @@
 // Canned Settings states for checking the page without Chrome or Agent Bridge.
-// options.html?demo shows every agent state; ?demo=setup shows first run.
+// options.html?demo shows every agent state; ?demo=setup shows first run,
+// ?demo=partial a checklist with one step left.
 
 const variant = new URLSearchParams(location.search).get("demo");
 
@@ -49,10 +50,11 @@ const full = {
 };
 
 const setup = { connected: false, userScripts: false, agents: null, auths: {}, mods: [] };
+const partial = { connected: true, userScripts: true, agents: { list: list.map((a) => ({ ...a, installedVersion: null })) }, auths: {}, mods: [] };
 
 export function connect() {
   const listeners = [];
-  const state = structuredClone(variant === "setup" ? setup : full);
+  const state = structuredClone({ setup, partial }[variant] ?? full);
   const emit = () => setTimeout(() => listeners.forEach((l) => l({ type: "state", state: structuredClone(state) })), 0);
   return {
     onMessage: {
