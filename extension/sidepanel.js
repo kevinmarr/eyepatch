@@ -260,7 +260,7 @@ function renderMoreMenu() {
   el.hidden = !open;
   $("more").setAttribute("aria-expanded", String(open));
   if (!open) return;
-  let html = "";
+  let html = `<div class="menu-group"><button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span class="grow">Settings</span></button></div>`;
   const mods = (state?.mods ?? []).filter((m) => !m.error && tab.url && modApplies(m, tab.url));
   if (mods.length) {
     html +=
@@ -283,7 +283,6 @@ function renderMoreMenu() {
     if (chats.length > recent.length) html += `<button type="button" class="menu-item" role="menuitem" data-action="all"><span class="grow">All chats</span>${icon("chevron-right", { size: 14 })}</button>`;
     html += `</div>`;
   }
-  html += `<div class="menu-group"><button type="button" class="menu-item" role="menuitem" data-action="settings">${icon("settings")}<span class="grow">Settings</span></button></div>`;
   el.innerHTML = html;
 }
 

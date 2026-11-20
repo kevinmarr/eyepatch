@@ -27,9 +27,9 @@ design review; this skill is how to keep new UI consistent with it.
 - **Color:** text on background, grays for hierarchy. The only color is
   `--danger` (red), for errors and destructive actions. The toolbar badge is
   the one exception (below).
-- **No horizontal divider lines** anywhere: not between sections, rows,
-  header and content, or menu groups. Use space and type. A Markdown `---`
-  written by the agent is the only rule.
+- **No horizontal divider lines**: not between sections, rows, or header and
+  content. Use space and type. Two exceptions: a hairline between groups in a
+  menu (`.menu-group + .menu-group`), and a Markdown `---` the agent wrote.
 - **No accent stripe** on one edge of a box. **No eyebrows** (small uppercase
   labels above headings). **Don't over-use cards**: group with spacing; boxes
   are for floating things (message box, menus, dialogs) and for flows opened
@@ -92,10 +92,10 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
 - **Empty chat** (`.empty`): the mark (48 px) and "What do you want to
   modify?" centered above the message box; idea `.chip`s (with icons) sit just
   above the box.
-- **More menu** (`.menu`): "Mods on this page" (with `.switch`es, an off mod
-  greyed), "Recent chats" (title and time; current one highlighted), "All
-  chats", Settings. Groups are separated by space and `.menu-label`, never
-  lines.
+- **More menu** (`.menu`): Settings first, then "Mods on this page" (with
+  `.switch`es, an off mod greyed) and "Recent chats" (title and time), ending
+  with "All chats". Groups have a `.menu-label` and a hairline between them.
+  Menus can be nearly as tall as the panel.
 - **Agent switcher:** agents with logo tiles (`.tile.sm`) and a check on the
   current one; last item "Add more agents" opens Settings.
 - **Model picker:** a menu; add a filter field when there are more than ~10.

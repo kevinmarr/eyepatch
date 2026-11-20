@@ -205,12 +205,14 @@ svg.icon { flex: none; display: block; }
 /* ---------- Menus ---------- */
 
 .menu {
-  position: absolute; z-index: 10; min-width: 184px; max-height: min(560px, 80vh); overflow: auto;
-  padding: 8px 6px; display: flex; flex-direction: column; gap: 14px;
+  position: absolute; z-index: 10; min-width: 184px; max-height: calc(100vh - 64px); overflow: auto;
+  padding: 6px; display: flex; flex-direction: column; gap: 6px;
   background: var(--popover); border: 1px solid var(--line); border-radius: var(--r-pop);
   box-shadow: var(--shadow-pop); font-size: var(--fs-ui);
 }
 .menu-group { display: flex; flex-direction: column; }
+/* Menus are the one place groups get a divider: they're dense and scanned fast. */
+.menu-group + .menu-group { margin: 0 -6px; padding: 6px 6px 0; border-top: 1px solid var(--line); }
 .menu-label { margin: 0; padding: 0 10px; font-size: var(--fs-meta); font-weight: 500; line-height: 28px; color: var(--text-faint); }
 .menu-item {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px;
