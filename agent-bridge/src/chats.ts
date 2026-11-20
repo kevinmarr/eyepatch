@@ -408,6 +408,7 @@ export class Chats {
 
   /** Record something for the tab's chat and send it to the extension. */
   private emit(chat: Chat, event: ChatEvent) {
+    event.at ??= Date.now(); // the side panel shows how long turns and tools took
     chat.events.push(event);
     if (chat.events.length > MAX_EVENTS) chat.events = chat.events.slice(-MAX_EVENTS);
     this.extension.send({ ...event, tabId: chat.tabId });
@@ -617,7 +618,7 @@ export class Chats {
     if (!agent) return this.error(chat, "Choose an agent first.");
     if (!agent.ready) return this.error(chat, "The agent is still starting. Try again in a moment.");
     if (chat.busy) return this.error(chat, "The agent is busy; stop it or wait for it to finish.");
-    if (agent.auth.needsSignIn) return this.error(chat, `Sign in to ${agent.name} first.`);
+    if (agent.auth.needsSignIn) return this.error(chat, `Authenticate ${agent.name} first.`);
 
     chat.busy = true;
     const conversation = chat.conversation;
@@ -645,7 +646,7 @@ export class Chats {
       this.error(
         chat,
         authRequired
-          ? `Sign in to ${agent.name} to continue.`
+          ? `Authenticate ${agent.name} to continue.`
           : code === -32601 // method not found, e.g. no session/new
             ? `${agent.name} can't start a conversation, so it can't be used with site-modder. Pick another agent from the New chat menu.`
             : String((e as Error).message ?? e),
@@ -735,10 +736,11 @@ export class Chats {
         if (!this.permissions.has(id)) return;
         this.permissions.delete(id);
         // Remember it so the tool call itself doesn't ask a second time.
-        const kind = params.options.find((o) => o.optionId === optionId)?.kind;
+        const option = params.options.find((o) => o.optionId === optionId);
+        const kind = option?.kind;
         if (guarded && kind === "allow_once") chat.approvals.set(guarded, Date.now());
         if (guarded && kind === "allow_always") chat.alwaysAllowed.add(guarded);
-        this.emit(chat, { type: "permission_resolved", id });
+        this.emit(chat, { type: "permission_resolved", id, option: option ? { name: option.name, kind: option.kind } : null });
         resolve(optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } });
       };
       (done as { tabId?: number }).tabId = chat.tabId;

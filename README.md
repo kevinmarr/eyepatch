@@ -1,4 +1,4 @@
-# site-modder
+# site-modder (Eyepatch)
 
 Modify any website by chatting with a coding agent from Chrome's side panel.
 The agent (Claude, Codex, Gemini CLI or any other ACP agent) runs on your
@@ -66,9 +66,9 @@ Copies can be large: Claude Agent is about 200 MB to download and 425 MB on
 disk, since it includes Claude Code. Agents usually share sign-in with their
 regular install, so if you already use one you're probably signed in.
 
-To start a new chat with a different agent, open the menu on the side of
-**New chat** and pick one of your installed agents; **Add more agents** opens
-the Options page. The model
+To start a new chat with a different agent, click the agent's name at the top
+of the side panel and pick one of your installed agents; **Add more agents**
+opens the Options page. The model
 menu under the message box is per tab too; the model you pick last for an
 agent is what its new chats start with.
 
@@ -84,15 +84,15 @@ site-modder uses your agent's existing sign-in; it doesn't manage credentials.
 If you're already signed in to Claude Code or Codex, there's nothing to do.
 
 The Options page lists each installed agent with whatever account it reports
-(Claude Agent reports one; Codex doesn't) and a **Sign in again** button. Its
-sign-in options come from the agent over ACP, so this works for any ACP agent.
+(Claude Agent reports one; Codex doesn't) and **Reauthenticate** in its ⋮ menu.
+Its sign-in options come from the agent over ACP, so this works for any ACP agent.
 Some the agent runs itself. Others are commands Agent Bridge runs, relaying the
 output (with clickable links) and a box to paste a code back. While the
 Options page is open, Agent Bridge keeps every installed agent running so they
 can report their status.
 
-If an agent reports it's signed out, the side panel shows a **Sign in** button
-that opens the Options page at that agent.
+If an agent reports it's signed out, the side panel shows an **Authenticate**
+button that opens the Options page at that agent.
 
 ## Working in the background
 
@@ -106,9 +106,10 @@ you when its agent:
 
 Clicking a notification brings up that tab with its side panel open.
 
-Each tab's toolbar badge shows the same thing at a glance: `…` while its
-agent is working, `!` when it needs you, and `✓` when it has finished and you
-haven't looked yet. Otherwise it shows how many mods are running on the page.
+Each tab's toolbar badge shows the same thing at a glance: a red `!` when it
+needs you, a blue `•••` while its agent is working, and a green `✓` when it has
+finished and you haven't looked yet. Otherwise it shows how many mods are
+running on the page, in gray.
 On macOS, Chrome itself needs notification permission (System Settings →
 Notifications → Google Chrome).
 
@@ -131,6 +132,13 @@ every matching tab.
   `chrome://extensions`. Reopen the side panel after a reload.
 - **Agent Bridge:** `npm run dev` restarts on change. The extension reconnects by
   itself.
+- **UI without Chrome:** serve `extension/` over HTTP (e.g.
+  `python3 -m http.server -d extension`) and open `sidepanel.html?demo` for a
+  canned chat with every Markdown element, tool calls and a permission request
+  (send a message to watch a reply stream in; include "slow" to stream word by
+  word), `options.html?demo` (or `?demo=setup`) for Settings, and
+  `design.html` for every component. The design rules are in
+  `.claude/skills/eyepatch-ui`.
 - **Without Chrome:** `npm run fake-extension -- "make the h1 red"` drives the
   Agent Bridge with canned page data. Add `FAKE_AGENT=claude-acp` (any registry
   id) to pick and install that agent first.

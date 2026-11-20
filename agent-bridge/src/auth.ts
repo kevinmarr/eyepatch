@@ -162,7 +162,7 @@ export class AuthManager {
 
   async start(methodId: string) {
     const method = this.methods.find((m) => m.id === methodId);
-    if (!method) return this.fail(`Unknown sign-in method ${methodId}`);
+    if (!method) return this.fail(`unknown method ${methodId}`);
     if (this.signIn) this.cancel();
     this.error = null;
     if (isTerminal(method)) this.runTerminal(method);
@@ -196,7 +196,7 @@ export class AuthManager {
     child.on("error", (e) => {
       if (this.signIn !== run) return;
       this.signIn = null;
-      this.fail(`Couldn't start sign-in: ${e.message}`);
+      this.fail(`couldn't start: ${e.message}`);
     });
     child.on("exit", async (code) => {
       if (this.signIn !== run) return;
@@ -208,7 +208,7 @@ export class AuthManager {
         await this.deps.restartAgent();
       } else {
         const tail = run.output.trim().split("\n").slice(-3).join(" ");
-        this.fail(`Sign-in didn't finish (exit ${code}).${tail ? ` ${tail}` : ""}`);
+        this.fail(`it didn't finish (exit ${code}).${tail ? ` ${tail}` : ""}`);
       }
     });
     this.send();
@@ -231,7 +231,7 @@ export class AuthManager {
     } catch (e) {
       if (this.signIn !== run) return;
       this.signIn = null;
-      this.fail(`Sign-in failed: ${(e as Error).message}`);
+      this.fail(`${(e as Error).message}`);
     }
   }
 

@@ -3,36 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>site-modder</title>
+    <title>Eyepatch Settings</title>
+    <link rel="stylesheet" href="ui/eyepatch.css" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <main>
-      <h1><img src="icons/icon48.png" alt="" />site-modder</h1>
+    <main class="page">
+      <div class="title-block">
+        <div class="page-title"><span id="mark"></span><h1>Settings</h1></div>
+        <ul id="setup-done" class="setup-done" aria-label="Setup" hidden></ul>
+      </div>
 
-      <section>
-        <h2>Setup</h2>
-        <ul id="setup" class="rows"></ul>
+      <section id="setup" class="section" aria-labelledby="setup-h" hidden>
+        <div class="section-head"><h2 id="setup-h">Setup</h2><span id="setup-count" class="muted"></span></div>
+        <ol id="steps" class="steps"></ol>
       </section>
 
-      <section id="agents-section">
-        <h2>Agents</h2>
-        <ul id="installed" class="rows"></ul>
+      <section id="agents-section" class="section" aria-labelledby="agents-h" hidden>
+        <h2 id="agents-h">Agents</h2>
+        <div id="agents"></div>
         <div id="add-status"></div>
-        <div id="add" class="add">
-          <button id="add-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="add-menu">
-            <i data-icon="plus"></i>
-            <span>Add</span>
-          </button>
-          <div id="add-menu" class="menu" role="menu" hidden></div>
-        </div>
+        <button id="add-btn" type="button" class="row add-row"><span class="tile add-tile"><svg data-icon="plus"></svg></span><span class="main"><span class="name">Add an agent</span></span></button>
       </section>
 
-      <section id="mods-section" hidden>
-        <h2>Mods</h2>
-        <div id="mods"></div>
+      <section id="mods-section" class="section" aria-labelledby="mods-h" hidden>
+        <h2 id="mods-h">Mods</h2>
+        <div id="mods" class="mod-groups"></div>
       </section>
     </main>
+
+    <dialog id="add-dialog" class="dialog" aria-labelledby="add-h">
+      <div class="dialog-head">
+        <h2 id="add-h">Add an agent</h2>
+        <button id="add-close" type="button" class="icon-btn" aria-label="Close"><svg data-icon="x"></svg></button>
+      </div>
+      <div class="dialog-search"><input id="add-filter" class="field" type="search" placeholder="Search agents" aria-label="Search agents" /></div>
+      <div id="add-list" class="add-list" role="list"></div>
+    </dialog>
     <script src="options.js" type="module"></script>
   </body>
 </html>

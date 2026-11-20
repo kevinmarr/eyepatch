@@ -172,6 +172,7 @@ async function onBridgeMessage(msg) {
 /** Add an event to a tab's chat and show it. */
 function record(tabId, event) {
   if (tabId == null) return;
+  event.at ??= Date.now();
   let t = transcripts.get(tabId);
   if (!t) transcripts.set(tabId, (t = []));
   t.push(event);
@@ -232,6 +233,7 @@ chrome.runtime.onConnect.addListener((port) => {
     if (!optionsPages.size) send({ type: "options_close" });
   });
   port.onMessage.addListener((msg) => {
+    if (msg.type === "color_scheme") return setToolbarIcon(msg.dark);
     if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete"].includes(msg.type)) send(msg);
   });
 });
@@ -288,6 +290,9 @@ chrome.runtime.onConnect.addListener((port) => {
         break;
       case "permission_response":
         send({ type: "permission_response", id: msg.id, optionId: msg.optionId });
+        break;
+      case "color_scheme":
+        setToolbarIcon(msg.dark);
         break;
       case "visibility":
         panelVisible.set(port, msg.visible);
@@ -406,7 +411,7 @@ function checkUserScripts() {
 setInterval(() => (panels.size || optionsPages.size) && checkUserScripts(), 1000);
 
 const USER_SCRIPTS_HELP =
-  'User scripts are disabled. Open chrome://extensions, click "Details" on site-modder and turn on "Allow User Scripts".';
+  'User scripts are disabled. Open chrome://extensions, click "Details" on Eyepatch and turn on "Allow User Scripts".';
 
 async function inPage(tabId, func, args) {
   const [res] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
@@ -867,7 +872,7 @@ async function attend(tabId, event) {
     case "permission_request": {
       a.permissions.add(event.id);
       await notify(tabId, `perm:${event.id}`, {
-        title: "site-modder needs your permission",
+        title: "Eyepatch needs your permission",
         message: clip(event.toolCall?.title ?? "The agent wants to run a tool"),
         sticky: true,
       });
@@ -879,8 +884,8 @@ async function attend(tabId, event) {
       break;
     case "tab_request":
       await notify(tabId, `tab:${event.id}`, {
-        title: "site-modder wants to see a tab",
-        message: clip(`Switch back to “${event.title || event.url}” so the agent can ${event.purpose}.`),
+        title: "Come back to this tab",
+        message: clip(`The agent is waiting to ${event.purpose} of “${event.title || event.url}”.`),
         sticky: true,
       });
       break;
@@ -892,7 +897,7 @@ async function attend(tabId, event) {
       a.unseenTurnEnd = !(await userIsWatching(tabId));
       const failed = event.stopReason === "error" || event.stopReason === "refusal";
       await notify(tabId, `done:${tabId}:${Date.now()}`, {
-        title: failed ? "site-modder stopped with an error" : "site-modder is done",
+        title: failed ? "Eyepatch stopped with an error" : "Eyepatch is done",
         message: clip(a.finalText) || (failed ? "Open the side panel for details." : "The agent finished its turn."),
       });
       break;
@@ -903,27 +908,37 @@ async function attend(tabId, event) {
   updateBadge(tabId);
 }
 
+// Chrome draws the badge; one set of colors works on light and dark toolbars.
+const BADGE = {
+  needsYou: ["!", "#D93025"],
+  working: ["•••", "#1A73E8"],
+  done: ["✓", "#188038"],
+  mods: [null, "#5F6368"],
+};
+
 function updateBadge(tabId) {
   const a = attention.get(tabId);
   const waiting = a?.permissions.size || [...tabRequests.values()].some((r) => r.tabId === tabId);
-  let text = "";
-  let color = "#6e6e73";
-  if (waiting) {
-    text = "!";
-    color = "#c2410c";
-  } else if (chats.get(tabId)?.busy) {
-    text = "…";
-  } else if (a?.unseenTurnEnd) {
-    text = "✓";
-    color = "#15803d";
-  } else if (modsRan.get(tabId)?.ids.size) {
-    text = String(modsRan.get(tabId).ids.size);
-    color = "#646464";
-  }
+  let badge = ["", BADGE.mods[1]];
+  if (waiting) badge = BADGE.needsYou;
+  else if (chats.get(tabId)?.busy) badge = BADGE.working;
+  else if (a?.unseenTurnEnd) badge = BADGE.done;
+  else if (modsRan.get(tabId)?.ids.size) badge = [String(modsRan.get(tabId).ids.size), BADGE.mods[1]];
+  const [text, color] = badge;
   chrome.action.setBadgeText({ tabId, text }).catch(() => {});
   chrome.action.setBadgeBackgroundColor({ tabId, color }).catch(() => {});
-  chrome.action.setBadgeTextColor({ tabId, color: "#ffffff" }).catch(() => {});
+  chrome.action.setBadgeTextColor({ tabId, color: "#FFFFFF" }).catch(() => {});
 }
+
+// The toolbar icon is black; on a dark toolbar use the white one. Pages report
+// Chrome's color scheme (the service worker can't see it).
+async function setToolbarIcon(dark) {
+  if (dark == null) dark = (await chrome.storage.local.get("darkToolbar")).darkToolbar ?? false;
+  else chrome.storage.local.set({ darkToolbar: dark });
+  const suffix = dark ? "-dark" : "";
+  chrome.action.setIcon({ path: { 16: `icons/icon16${suffix}.png`, 32: `icons/icon32${suffix}.png` } }).catch(() => {});
+}
+setToolbarIcon();
 
 // ---------- mods running in each tab ----------
 // Each enabled mod has a tiny script that reports when it runs in a page, so

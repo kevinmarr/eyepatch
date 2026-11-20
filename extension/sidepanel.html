@@ -3,41 +3,51 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>site-modder</title>
+    <title>Eyepatch</title>
+    <link rel="stylesheet" href="ui/eyepatch.css" />
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
   <body>
-    <header>
-      <div id="agent" class="agent-name" hidden></div>
-      <div class="actions">
-        <button id="stop" hidden title="Stop the agent">Stop</button>
-        <div id="new-wrap" class="split">
-          <button id="new" type="button">New chat</button>
-          <button id="new-menu-btn" type="button" aria-label="New chat with another agent" title="New chat with another agent" aria-haspopup="menu" aria-expanded="false" aria-controls="new-menu"></button>
-          <div id="new-menu" class="menu" role="menu" hidden></div>
+    <div class="panel" id="panel">
+      <header class="panel-header">
+        <div class="menu-anchor">
+          <button id="agent" class="agent-btn" type="button" aria-haspopup="menu" aria-expanded="false" hidden></button>
+          <div id="agent-menu" class="menu agent-menu" role="menu" aria-label="Agents" hidden></div>
         </div>
-        <div class="more-wrap">
-          <button id="more" type="button" class="icon" aria-label="More" title="More" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">
-            <i data-icon="ellipsis-vertical"></i>
-          </button>
-          <div id="more-menu" class="menu more-menu" role="menu" hidden></div>
+        <span class="spacer"></span>
+        <button id="new" class="icon-btn" type="button" aria-label="New chat" title="New chat" hidden><svg data-icon="square-pen"></svg></button>
+        <div class="menu-anchor">
+          <button id="more" class="icon-btn" type="button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded="false"><svg data-icon="ellipsis"></svg></button>
+          <div id="more-menu" class="menu more-menu" role="menu" aria-label="More" hidden></div>
         </div>
+      </header>
+      <div id="alerts" class="alerts"></div>
+      <main id="thread" class="thread" aria-live="polite"></main>
+      <div class="composer-wrap">
+        <div id="chips" class="chips" role="list" aria-label="Ideas" hidden></div>
+        <form id="composer" class="composer">
+          <textarea id="input" rows="1" aria-label="Message" placeholder="Ask for a change to this page"></textarea>
+          <div class="composer-bar">
+            <span id="page" class="pill" hidden><svg data-icon="globe" data-size="14"></svg><span></span></span>
+            <span class="spacer"></span>
+            <div class="menu-anchor">
+              <button id="model" class="model-btn" type="button" aria-haspopup="listbox" aria-expanded="false" hidden></button>
+              <div id="model-menu" class="menu model-menu" role="listbox" aria-label="Model" hidden></div>
+            </div>
+            <button id="send" class="send" type="submit" aria-label="Send" title="Send"><svg data-icon="arrow-up" data-stroke="2.25"></svg></button>
+            <button id="stop" class="send" type="button" aria-label="Stop" title="Stop" hidden><span class="stop-square" aria-hidden="true"></span></button>
+          </div>
+        </form>
       </div>
-    </header>
-    <div id="banners"></div>
-    <section id="setup" class="setup" hidden>
-      <p>Choose a coding agent to get started.</p>
-      <button id="setup-open" type="button" class="primary">Open setup</button>
+    </div>
+    <section id="all-chats" class="all-chats" aria-label="All chats" hidden>
+      <header class="panel-header">
+        <button id="all-back" class="icon-btn" type="button" aria-label="Back"><svg data-icon="arrow-left"></svg></button>
+        <h1>All chats</h1>
+      </header>
+      <div class="all-search"><input id="all-filter" class="field" type="search" placeholder="Search chats" aria-label="Search chats" /></div>
+      <div id="all-list" class="all-list"></div>
     </section>
-    <main id="log"></main>
-    <form id="composer">
-      <div id="page" class="page"></div>
-      <textarea id="input" rows="3" placeholder="Describe a change to this page…"></textarea>
-      <div class="composer-row">
-        <select id="model" aria-label="Model" hidden></select>
-        <button id="send" type="submit">Send</button>
-      </div>
-    </form>
     <script src="sidepanel.js" type="module"></script>
   </body>
 </html>

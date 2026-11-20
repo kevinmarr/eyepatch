@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "site-modder",
+  "name": "Eyepatch",
   "version": "0.1.0",
-  "description": "Modify any website by chatting with a coding agent that runs on your machine.",
+  "description": "Change how any website looks and works by chatting with a coding agent on your computer.",
   "minimum_chrome_version": "135",
   "icons": {
     "16": "icons/icon16.png",
@@ -31,7 +31,7 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "Open site-modder",
+    "default_title": "Open Eyepatch",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"

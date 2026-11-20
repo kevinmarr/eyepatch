@@ -115,6 +115,7 @@ body.pointer :focus-visible { outline: none; }
 a { color: var(--text); text-decoration: underline; text-decoration-color: var(--text-faint); text-underline-offset: 3px; }
 code, pre, kbd { font-family: var(--mono); }
 svg.icon { flex: none; display: block; }
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -350,7 +351,8 @@ button.tool:hover { background: var(--surface); }
 }
 .md blockquote > * { margin: 0; }
 .md hr { width: 100%; height: 1px; border: 0; background: var(--line); margin: 6px 0; } /* the one allowed rule: the agent wrote it */
-.md table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; line-height: 1.45; display: block; overflow-x: auto; }
+.md .table-wrap { overflow-x: auto; }
+.md table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; line-height: 1.45; }
 .md th { padding: 6px 10px; text-align: left; font-weight: 500; color: var(--text-muted); background: var(--surface); }
 .md th:first-child { border-radius: 8px 0 0 8px; }
 .md th:last-child { border-radius: 0 8px 8px 0; }
