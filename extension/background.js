@@ -242,7 +242,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
   port.onMessage.addListener((msg) => {
     if (msg.type === "color_scheme") return setToolbarIcon(msg.dark);
-    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete"].includes(msg.type)) send(msg);
+    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete", "mod_reveal"].includes(msg.type)) send(msg);
   });
 });
 

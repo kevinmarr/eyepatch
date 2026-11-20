@@ -79,5 +79,3 @@ the side panel, or not at all:
 - **Claude Agent picks API key on its own:** setting up Claude Agent never
   asks how to authenticate; it defaults to the API key, and switching to a
   subscription takes Reauthenticate. Ask on first setup when there's a choice.
-- **See a mod's source:** a way to open a mod's files from Settings (maybe
-  just reveal its folder in Finder).

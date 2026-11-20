@@ -393,6 +393,7 @@ function renderMods(s) {
             : `<div class="row" data-mod="${esc(m.id)}"><div class="main"><span class="name">${esc(m.name)}</span>` +
               `<span class="sub${m.error ? " danger" : ""}" title="${esc(m.error ?? m.description ?? "")}">${esc(m.error ?? m.description ?? m.id)}</span></div>` +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
+              `<button type="button" class="icon-btn lg" data-do="reveal" aria-label="Open ${esc(m.name)}’s folder" title="Open folder">${icon("folder-open")}</button>` +
               `<button type="button" class="icon-btn lg" data-do="ask-delete" aria-label="Delete ${esc(m.name)}" title="Delete">${icon("trash-2")}</button></div>`,
         )
         .join("");
@@ -411,6 +412,7 @@ $("mods").addEventListener("click", (e) => {
     sw.setAttribute("aria-checked", String(enabled));
     return post({ type: "mod_set_enabled", id, enabled });
   }
+  if (what === "reveal") return post({ type: "mod_reveal", id });
   if (what === "ask-delete") confirming = `mod:${id}`;
   else if (what === "confirm-cancel") confirming = null;
   else if (what === "delete") {

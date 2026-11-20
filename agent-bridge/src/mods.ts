@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -74,6 +75,14 @@ export async function setModEnabled(id: string, enabled: boolean) {
   const meta = JSON.parse(await fsp.readFile(file, "utf8"));
   meta.enabled = enabled;
   await fsp.writeFile(file, JSON.stringify(meta, null, 2) + "\n");
+}
+
+/** Open a mod's folder in Finder (or the system's file manager) to see its files. */
+export async function revealMod(id: string) {
+  const dir = modDir(id);
+  await fsp.access(dir);
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+  execFile(opener, [dir], (e) => e && process.platform !== "win32" && console.error(`[mods] couldn't open ${dir}:`, e.message));
 }
 
 /** Delete a mod. Its folder moves to ~/.eyepatch/trash, in case it's wanted back. */
