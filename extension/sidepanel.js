@@ -605,11 +605,16 @@ function renderStatus() {
     turn.statusEl.setAttribute("role", "status");
     keepAtBottom(() => thread.appendChild(turn.statusEl));
   }
-  const logo = `<span class="breathe">${agentLogo(currentAgent())}</span>`;
+  // Build the logo once: replacing it every tick would restart its animation.
+  const logo = agentLogo(currentAgent());
+  if (turn.statusEl.dataset.logo !== logo) {
+    turn.statusEl.dataset.logo = logo;
+    turn.statusEl.innerHTML = `<span class="breathe">${logo}</span><span class="elapsed"></span>`;
+  }
   const t = clock(Date.now() - turn.start);
-  if (turn.statusEl.dataset.t !== t || !turn.statusEl.firstChild) {
-    turn.statusEl.dataset.t = t;
-    turn.statusEl.innerHTML = `${logo}<span>${t}</span>`;
+  const elapsed = turn.statusEl.querySelector(".elapsed");
+  if (elapsed.textContent !== t) {
+    elapsed.textContent = t;
     turn.statusEl.setAttribute("aria-label", `Working, ${t}`);
   }
 }
