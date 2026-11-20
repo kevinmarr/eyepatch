@@ -249,6 +249,12 @@ svg.icon { flex: none; display: block; }
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 
+/* A sent message with images: thumbnails above the bubble. */
+.user-message { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.user-message .bubble { max-width: 100%; }
+.message-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.message-images img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--r-lg); background: var(--surface); }
+
 /* Message box */
 .composer-wrap { flex: none; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 2px; }
@@ -262,6 +268,16 @@ svg.icon { flex: none; display: block; }
   min-height: calc(2 * 1.5em); /* two lines, like the designs, before it grows */
 }
 .composer-bar { display: flex; align-items: center; gap: 4px; }
+/* Images waiting to be sent, above the text. */
+.attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 6px; }
+.attachment { position: relative; width: 56px; height: 56px; }
+.attachment img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--r-lg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.attachment .remove {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid var(--bg); background: var(--text); color: var(--bg); padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.composer.dropping { box-shadow: var(--shadow-box), 0 0 0 2px var(--text); }
 .composer-bar .spacer { flex: 1; }
 .model-btn {
   display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border: 0; border-radius: var(--r-sm);

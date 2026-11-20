@@ -101,6 +101,7 @@ function setState(s) {
   $("stop").hidden = !c.busy;
   $("send").disabled = !hasAgent || !c.ready || needsAuth(s);
   input.disabled = c.connected && c.needsAgent;
+  $("attach").hidden = !c.images;
 
   renderAlerts();
   renderPicker("model");
@@ -169,9 +170,12 @@ function autosize() {
 input.addEventListener("input", autosize);
 
 function submit(text = input.value.trim()) {
-  if (!text || !state?.bridge.ready || state.bridge.busy || needsAuth(state)) return;
-  port.postMessage({ type: "prompt", text });
+  const images = state?.bridge.images ? attachments : [];
+  if ((!text && !images.length) || !state?.bridge.ready || state.bridge.busy || needsAuth(state)) return;
+  port.postMessage({ type: "prompt", text, images: images.length ? images : undefined });
   input.value = "";
+  attachments = [];
+  renderAttachments();
   autosize();
 }
 $("composer").addEventListener("submit", (e) => {
@@ -186,6 +190,85 @@ input.addEventListener("keydown", (e) => {
 });
 $("stop").addEventListener("click", () => port.postMessage({ type: "cancel" }));
 $("new").addEventListener("click", () => port.postMessage({ type: "new_session" }));
+
+// ---------- images ----------
+
+const MAX_IMAGES = 6;
+const MAX_EDGE = 1568; // the model API downscales anything larger
+const THUMB_EDGE = 160;
+let attachments = []; // { mimeType, data, thumb }
+
+/** Scale an image down to fit `edge` and encode it. JPEG on white for photos and thumbnails, PNG otherwise. */
+function encode(bmp, edge, type) {
+  const scale = Math.min(1, edge / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (type === "image/jpeg") {
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL(type, 0.88);
+}
+
+async function addImages(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/") || attachments.length >= MAX_IMAGES) continue;
+    try {
+      const bmp = await createImageBitmap(file);
+      const mimeType = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
+      const full = encode(bmp, MAX_EDGE, mimeType);
+      attachments.push({ mimeType, data: full.slice(full.indexOf(",") + 1), thumb: encode(bmp, THUMB_EDGE, "image/jpeg") });
+    } catch (e) {
+      console.warn("[eyepatch] couldn't read image:", e);
+    }
+  }
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const el = $("attachments");
+  el.hidden = !attachments.length;
+  el.innerHTML = attachments
+    .map((a, i) => `<div class="attachment"><img src="${a.thumb}" alt="Image ${i + 1}" /><button type="button" class="remove" data-remove="${i}" aria-label="Remove image ${i + 1}">${icon("x", { size: 12, stroke: 2.5 })}</button></div>`)
+    .join("");
+}
+$("attachments").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-remove]");
+  if (!b) return;
+  attachments.splice(Number(b.dataset.remove), 1);
+  renderAttachments();
+  input.focus();
+});
+
+$("attach").addEventListener("click", () => $("files").click());
+$("files").addEventListener("change", () => {
+  void addImages([...$("files").files]);
+  $("files").value = "";
+  input.focus();
+});
+input.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+  if (!files.length || !state?.bridge.images) return;
+  e.preventDefault();
+  void addImages(files);
+});
+// Drop images anywhere on the panel.
+const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes("Files");
+document.addEventListener("dragover", (e) => {
+  if (!hasFiles(e) || !state?.bridge.images) return;
+  e.preventDefault();
+  $("composer").classList.add("dropping");
+});
+document.addEventListener("dragleave", (e) => !e.relatedTarget && $("composer").classList.remove("dropping"));
+document.addEventListener("drop", (e) => {
+  $("composer").classList.remove("dropping");
+  if (!hasFiles(e) || !state?.bridge.images) return;
+  e.preventDefault();
+  void addImages([...e.dataTransfer.files]);
+});
 
 // ---------- menus (agent switcher, more, model) ----------
 
@@ -515,7 +598,19 @@ function render(e, { replay = false } = {}) {
       planEl = null;
       hasMessages = true;
       renderEmpty();
-      append(el("p", "bubble")).textContent = e.text;
+      if (e.images?.length) {
+        const wrap = append(el("div", "user-message"));
+        const imgs = wrap.appendChild(el("div", "message-images"));
+        for (const src of e.images) {
+          if (!/^data:image\/(jpeg|png);base64,/.test(src)) continue;
+          const img = imgs.appendChild(el("img"));
+          img.src = src;
+          img.alt = "Attached image";
+        }
+        if (e.text) wrap.appendChild(el("p", "bubble")).textContent = e.text;
+      } else {
+        append(el("p", "bubble")).textContent = e.text;
+      }
       startTurn(e.at ?? Date.now());
       break;
     case "session_update":

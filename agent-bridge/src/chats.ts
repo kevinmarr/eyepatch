@@ -6,7 +6,7 @@ import type { AgentManager } from "./agents.js";
 import { AUTH_REQUIRED } from "./auth.js";
 import type { ToolSocket } from "./tool-socket.js";
 import { HOME, MODS_DIR } from "./config.js";
-import type { ExtensionSocket, FromExtension, PageInfo } from "./extension-socket.js";
+import type { ExtensionSocket, FromExtension, PageInfo, PromptImage } from "./extension-socket.js";
 import { modApplies } from "./match.js";
 import { loadMods, type Mod } from "./mods.js";
 
@@ -184,7 +184,7 @@ export class Chats {
         void this.close(msg.tabId);
         break;
       case "prompt":
-        void this.prompt(msg.tabId, msg.text, msg.page);
+        void this.prompt(msg.tabId, msg.text, msg.page, msg.images);
         break;
       case "cancel":
         void this.cancel(msg.tabId);
@@ -402,6 +402,7 @@ export class Chats {
         agentId: chat.agentId,
         agent: agent?.name ?? (chat.agentId ? this.catalog.nameOf(chat.agentId) : null),
         ready: Boolean(agent?.ready),
+        images: Boolean(agent?.images),
         busy: chat.busy,
         sessionId: chat.sessionId ?? null,
         model: this.optionView(chat, "model"),
@@ -618,13 +619,14 @@ export class Chats {
     this.emit(chat, { type: "session_update", update });
   }
 
-  private async prompt(tabId: number, text: string, page?: PageInfo) {
+  private async prompt(tabId: number, text: string, page?: PageInfo, images: PromptImage[] = []) {
     const chat = this.chat(tabId);
     const agent = this.agentFor(chat);
     if (!agent) return this.error(chat, "Choose an agent first.");
     if (!agent.ready) return this.error(chat, "The agent is still starting. Try again in a moment.");
     if (chat.busy) return this.error(chat, "The agent is busy; stop it or wait for it to finish.");
     if (agent.auth.needsSignIn) return this.error(chat, `Authenticate ${agent.name} first.`);
+    if (images.length && !agent.images) return this.error(chat, `${agent.name} can't read images.`);
 
     chat.busy = true;
     const conversation = chat.conversation;
@@ -632,15 +634,18 @@ export class Chats {
     // this turn on purpose, so nothing about it belongs in the new chat.
     const replaced = () => chat.conversation !== conversation;
     chat.url ??= page?.url;
-    this.emit(chat, { type: "user_message", text, url: page?.url });
+    // The chat keeps thumbnails only; the full images go to the agent.
+    const thumbs = images.map((i) => i.thumb).filter(Boolean);
+    this.emit(chat, { type: "user_message", text, url: page?.url, ...(thumbs.length ? { images: thumbs } : {}) });
     this.sendChat(chat);
     try {
       const sessionId = await this.ensureSession(chat);
       const context = page ? await pageContext(page) : "";
-      const res = await agent.conn!.agent.request(acp.methods.agent.session.prompt, {
-        sessionId,
-        prompt: [{ type: "text", text: context + text }],
-      });
+      const prompt: acp.ContentBlock[] = [
+        { type: "text", text: context + text },
+        ...images.map((i): acp.ContentBlock => ({ type: "image", mimeType: i.mimeType, data: i.data })),
+      ];
+      const res = await agent.conn!.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt });
       agent.auth.markWorking();
       if (!replaced()) this.emit(chat, { type: "turn_end", stopReason: res.stopReason });
     } catch (e) {

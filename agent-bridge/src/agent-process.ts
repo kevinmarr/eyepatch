@@ -32,6 +32,8 @@ export class AgentProcess {
   conn?: acp.ClientConnection;
   /** How the agent can reopen an earlier conversation, if at all. */
   reopen: "resume" | "load" | null = null;
+  /** Whether prompts can include images. */
+  images = false;
   readonly auth: AuthManager;
   private child?: ChildProcess;
   private sessions = new Map<string, SessionHandlers>();
@@ -143,6 +145,7 @@ export class AgentProcess {
     this.auth.onInitialized(init);
     const caps = init.agentCapabilities;
     this.reopen = caps?.sessionCapabilities?.resume ? "resume" : caps?.loadSession ? "load" : null;
+    this.images = Boolean(caps?.promptCapabilities?.image);
     this.ready = true;
     console.log(`[${this.id}] ready: ${this.name} (protocol v${init.protocolVersion})`);
     this.deps.onReady(this);

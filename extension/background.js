@@ -196,6 +196,7 @@ function state(tabId) {
       agentId: chat?.agentId ?? null,
       agent: chat?.agent ?? null,
       ready: Boolean(chat?.ready),
+      images: Boolean(chat?.images),
       busy: Boolean(chat?.busy),
       needsAgent: connected && Boolean(chat) && !chat.agentId,
     },
@@ -266,7 +267,7 @@ chrome.runtime.onConnect.addListener((port) => {
       case "prompt": {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         urlAtMessage.set(tabId, tab?.url ?? null);
-        send({ type: "prompt", tabId, text: msg.text, page: tab && { tabId, url: tab.url, title: tab.title } });
+        send({ type: "prompt", tabId, text: msg.text, images: msg.images, page: tab && { tabId, url: tab.url, title: tab.title } });
         break;
       }
       case "cancel":

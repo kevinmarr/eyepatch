@@ -9,7 +9,7 @@ export const tab = { url: "https://thequietreader.substack.com/p/the-quiet-death
 const MODELS = ["Default (recommended)", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"].map((name) => ({ value: name.toLowerCase().replace(/\W+/g, "-"), name }));
 
 const state = {
-  bridge: { connected: true, agentId: "claude-acp", agent: "Claude Agent", ready: true, busy: false, needsAgent: false },
+  bridge: { connected: true, agentId: "claude-acp", agent: "Claude Agent", ready: true, images: true, busy: false, needsAgent: false },
   auth: null,
   model: { current: "sonnet-5-5", options: MODELS },
   effort: { current: "high", options: ["Default", "Low", "Medium", "High", "Xhigh", "Max"].map((name) => ({ value: name.toLowerCase(), name })) },
@@ -117,8 +117,8 @@ export function connect() {
   let timers = [];
   const later = (ms, fn) => timers.push(setTimeout(fn, ms));
 
-  function respond(text) {
-    event({ type: "user_message", text });
+  function respond(text, images) {
+    event({ type: "user_message", text, ...(images?.length ? { images: images.map((i) => i.thumb) } : {}) });
     setBusy(true);
     const words = /slow/i.test(text);
     let t = 600;
@@ -152,7 +152,7 @@ export function connect() {
     postMessage(msg) {
       switch (msg.type) {
         case "prompt":
-          return respond(msg.text);
+          return respond(msg.text, msg.images);
         case "cancel":
           timers.forEach(clearTimeout);
           timers = [];

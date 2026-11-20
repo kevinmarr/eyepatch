@@ -6,7 +6,7 @@ export type FromExtension =
   | { type: "hello"; extensionVersion?: string; tabs?: number[] }
   | { type: "open_chat"; tabId: number }
   | { type: "close_chat"; tabId: number }
-  | { type: "prompt"; tabId: number; text: string; page?: PageInfo }
+  | { type: "prompt"; tabId: number; text: string; images?: PromptImage[]; page?: PageInfo }
   | { type: "cancel"; tabId: number }
   | { type: "new_session"; tabId: number }
   | { type: "permission_response"; id: string; optionId: string | null }
@@ -30,6 +30,8 @@ export type FromExtension =
   | { type: "auth_recheck"; agentId: string };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
+/** An image attached to a message: base64 data for the agent, and a small thumbnail (a data URL) for the chat. */
+export type PromptImage = { mimeType: string; data: string; thumb?: string };
 
 type CallOptions = { timeoutMs?: number; skipBarrier?: boolean };
 

@@ -26,8 +26,11 @@
       <div class="composer-wrap">
         <div id="chips" class="chips" role="list" aria-label="Ideas" hidden></div>
         <form id="composer" class="composer">
+          <div id="attachments" class="attachments" hidden></div>
           <textarea id="input" rows="1" aria-label="Message" placeholder="Ask for a change to this page"></textarea>
           <div class="composer-bar">
+            <button id="attach" class="icon-btn" type="button" aria-label="Attach images" title="Attach images" hidden><svg data-icon="paperclip" data-size="17"></svg></button>
+            <input id="files" type="file" accept="image/*" multiple hidden />
             <span id="page" class="pill" hidden><svg data-icon="globe" data-size="14"></svg><span></span></span>
             <span class="spacer"></span>
             <div class="menu-anchor">
