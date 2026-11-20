@@ -81,8 +81,8 @@ const TRANSCRIPT = [
   chunk("The page builds its contents from the h2 and h3 headings inside the post body. ", 2, "agent_thought_chunk"),
   chunk("I can lift that list into the left margin with a mod and highlight the visible section with an IntersectionObserver.", 4, "agent_thought_chunk"),
   chunk("I’ll look at how the page builds its table of contents first.", 9),
-  ...tool("t1", "Read page content", "read", 10),
-  ...tool("t2", "Find elements `nav.toc`", "search", 13),
+  ...tool("t1", "mcp__eyepatch__get_page_content", "other", 10),
+  ...tool("t2", "mcp__eyepatch__query_selector_all", "other", 13, { rawInput: { selector: "nav.toc" } }),
   ...tool("t3", "Create mod `substack-readable-toc`", "edit", 16),
   ...tool("t4", "Edit `mod.css`", "edit", 19, {
     content: [{ type: "diff", path: "mod.css", oldText: ".toc-gutter a { color: inherit; }\n.toc-gutter { width: 180px; }", newText: ".toc-gutter a { color: inherit; opacity: .6; }\n.toc-gutter a.active { opacity: 1; font-weight: 600; }\n.toc-gutter { width: 180px; }" }],
@@ -90,9 +90,9 @@ const TRANSCRIPT = [
   ...tool("t5", "Run `npm test`", "execute", 22, { status: "failed", rawOutput: "FAIL mod.test.js\n  ✕ highlights the visible section (12 ms)\n\nTests: 1 failed, 3 passed" }),
   ...tool("t6", "Edit `mod.js`", "edit", 26),
   ...tool("t7", "Run `npm test`", "execute", 29, { rawOutput: "PASS mod.test.js\nTests: 4 passed" }),
-  { type: "permission_request", at: at(32), id: "p1", toolCall: { title: "Run JavaScript in the page", rawInput: { code: "return [...document.querySelectorAll('.toc-gutter a')].length;" } }, options: [{ optionId: "a", name: "Allow", kind: "allow_once" }, { optionId: "b", name: "Always allow in this chat", kind: "allow_always" }, { optionId: "c", name: "Deny", kind: "reject_once" }] },
+  { type: "permission_request", at: at(32), id: "p1", toolCall: { title: "mcp__eyepatch__run_js", rawInput: { code: "return [...document.querySelectorAll('.toc-gutter a')].length;" } }, options: [{ optionId: "a", name: "Allow", kind: "allow_once" }, { optionId: "b", name: "Always allow in this chat", kind: "allow_always" }, { optionId: "c", name: "Deny", kind: "reject_once" }] },
   { type: "permission_resolved", at: at(35), id: "p1", option: { name: "Allow", kind: "allow_once" } },
-  ...tool("t8", "Take a screenshot", "other", 36),
+  ...tool("t8", "mcp__eyepatch__screenshot", "other", 36),
   { type: "session_update", at: at(40), update: { sessionUpdate: "plan", entries: [{ content: "Find the headings", status: "completed" }, { content: "Write the mod", status: "completed" }, { content: "Check it on a long post", status: "completed" }] } },
   chunk(REPLY, 44),
   { type: "turn_end", at: at(72), stopReason: "end_turn" },
@@ -123,7 +123,7 @@ export function connect() {
     let t = 600;
     later(t, () => event({ type: "session_update", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking what's on the page before changing it." } } }));
     t += 1500;
-    for (const [id, title, kind] of [["n1", "Read page content", "read"], ["n2", "Find elements `article h2`", "search"], ["n3", "Edit `mod.css`", "edit"], ["n4", "Edit `mod.js`", "edit"], ["n5", "Reload tab", "other"]]) {
+    for (const [id, title, kind] of [["n1", "mcp__eyepatch__get_page_content", "other"], ["n2", "mcp__eyepatch__query_selector_all", "other"], ["n3", "Edit `mod.css`", "edit"], ["n4", "Edit `mod.js`", "edit"], ["n5", "mcp__eyepatch__reload_tab", "other"]]) {
       later(t, () => event({ type: "session_update", update: { sessionUpdate: "tool_call", toolCallId: id + t, title, kind, status: "in_progress" } }));
       t += 1200;
       later(t, () => event({ type: "session_update", update: { sessionUpdate: "tool_call_update", toolCallId: id + (t - 1200), status: "completed" } }));

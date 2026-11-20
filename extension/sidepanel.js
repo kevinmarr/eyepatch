@@ -1,6 +1,7 @@
 import { modApplies } from "./match.js";
 import { fillIcons, icon, mark } from "./icons.js";
 import { codeBlock, esc, inline, markdown } from "./markdown.js";
+import { browserTool, toolTitle } from "./tool-names.js";
 
 const params = new URLSearchParams(location.search);
 // ?demo opens a canned chat (every Markdown element, tools, permissions)
@@ -711,6 +712,8 @@ function updateTool(t, patch) {
 
 const KIND_ICONS = { read: "file-text", edit: "file-pen", delete: "trash-2", move: "file-pen", search: "search", execute: "square-terminal", think: "brain", fetch: "globe" };
 function toolIcon(d) {
+  const ours = browserTool(d.title);
+  if (ours) return ours.icon;
   const title = (d.title ?? "").toLowerCase();
   if (title.includes("screenshot")) return "camera";
   if (title.includes("reload")) return "refresh-cw";
@@ -726,7 +729,7 @@ function renderTool(t) {
   const lead = running ? icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" }) : icon(toolIcon(d), { size: 15 });
   const detail = toolDetail(d);
   t.hasDetail = Boolean(detail);
-  t.row.innerHTML = `${lead}<span class="label">${inline(d.title ?? d.kind ?? "Tool")}</span><span class="meta"></span>`;
+  t.row.innerHTML = `${lead}<span class="label">${inline(toolTitle(d))}</span><span class="meta"></span>`;
   t.row.disabled = !t.hasDetail;
   t.row.style.cursor = t.hasDetail ? "" : "default";
   if (t.hasDetail) t.row.setAttribute("aria-expanded", String(!t.detail.hidden));
@@ -859,7 +862,7 @@ function renderPermission(e) {
   const sec = append(el("section", "request"));
   sec.setAttribute("aria-label", "Permission request");
   requests.set(e.id, sec);
-  const title = e.toolCall?.title ?? "The agent wants to run a tool";
+  const title = e.toolCall?.title ? toolTitle(e.toolCall) : "The agent wants to run a tool";
   const code = requestCode(e.toolCall);
   sec.innerHTML =
     `<h2 class="request-title">${icon(toolIcon(e.toolCall ?? {}), { size: 17 })}<span>${inline(title)}</span></h2>` +

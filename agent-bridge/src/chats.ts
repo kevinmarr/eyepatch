@@ -31,7 +31,7 @@ const UNPROMPTED_BROWSER_TOOL =
   /eyepatch[^a-z0-9]{1,3}(get_tab|get_page_content|query_selector_all|screenshot|get_console_logs|reload_tab)($|[^a-z0-9_])/i;
 
 /** Browser tools the user approves each use of, whatever the agent's own approval settings. */
-const GUARDED_TOOLS: Record<string, string> = { run_js: "Run JavaScript in this page" };
+const GUARDED_TOOLS: Record<string, string> = { run_js: "Run JavaScript in the page" };
 const guardedToolIn = (title: string) =>
   Object.keys(GUARDED_TOOLS).find((t) => new RegExp(`eyepatch[^a-z0-9]{1,3}${t}($|[^a-z0-9_])`, "i").test(title));
 /** How long a permission the agent asked for covers the tool call that follows it. */

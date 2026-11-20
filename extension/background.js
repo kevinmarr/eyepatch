@@ -1,4 +1,5 @@
 import { modApplies } from "./match.js";
+import { toolTitle } from "./tool-names.js";
 
 // Eyepatch service worker: owns the WebSocket to Agent Bridge (the local
 // program that runs the agents), runs browser tools for them, registers mods
@@ -873,7 +874,7 @@ async function attend(tabId, event) {
       a.permissions.add(event.id);
       await notify(tabId, `perm:${event.id}`, {
         title: "Eyepatch needs your permission",
-        message: clip(event.toolCall?.title ?? "The agent wants to run a tool"),
+        message: clip(event.toolCall?.title ? toolTitle(event.toolCall).replace(/`/g, "") : "The agent wants to run a tool"),
         sticky: true,
       });
       break;

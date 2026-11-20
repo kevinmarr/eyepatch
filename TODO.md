@@ -76,9 +76,6 @@ the side panel, or not at all:
 
 ## 5. Features and fixes
 
-- **Tidier tool names:** our browser tools show up raw in the chat (e.g.
-  `mcp__eyepatch__run_js`); show them as readable titles ("Run JavaScript
-  in the page").
 - **Claude Agent picks API key on its own:** setting up Claude Agent never
   asks how to authenticate; it defaults to the API key, and switching to a
   subscription takes Reauthenticate. Ask on first setup when there's a choice.
