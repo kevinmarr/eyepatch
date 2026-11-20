@@ -34,6 +34,11 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() =>
 chrome.sidePanel.setOptions({ enabled: false }).catch(() => {});
 
 chrome.action.onClicked.addListener((tab) => {
+  // The button toggles: a tab whose panel is open (it holds a port) closes it.
+  if (panels.has(tab.id) && chrome.sidePanel.close) {
+    chrome.sidePanel.close({ tabId: tab.id }).catch((e) => console.warn("[eyepatch] close panel:", e));
+    return;
+  }
   // Both calls must happen synchronously in the click for open() to be allowed.
   chrome.sidePanel.setOptions({ tabId: tab.id, path: `sidepanel.html?tab=${tab.id}`, enabled: true });
   chrome.sidePanel.open({ tabId: tab.id }).catch((e) => console.warn("[eyepatch] open panel:", e));
