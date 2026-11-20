@@ -371,7 +371,9 @@ button.tool:hover { background: var(--surface); }
 .group-title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 1.4; font-weight: 600; }
 .group-title .icon { color: var(--text-muted); }
 .group-title.danger { color: var(--danger); }
-.group-items { display: flex; flex-direction: column; padding-left: 24px; } /* 16px icon + 8px gap: mods line up with the site name */
+.group-items { display: flex; flex-direction: column; padding-left: 24px; }
+/* Mod rows pad instead of using a min-height, so a wrapped description doesn't eat the space between rows. */
+.group-items .row { min-height: 0; padding: 10px 0; } /* 16px icon + 8px gap: mods line up with the site name */
 .row { display: flex; align-items: center; gap: 16px; min-height: 64px; }
 .row.agent { min-height: 72px; }
 .row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
