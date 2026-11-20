@@ -454,7 +454,10 @@ const nearBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientH
 /** Add to the thread, keeping the working line last and following along if at the bottom. */
 function append(el) {
   const follow = nearBottom();
-  thread.querySelector(".empty")?.remove();
+  if (!hasMessages) {
+    hasMessages = true;
+    renderEmpty();
+  }
   const status = turn?.statusEl;
   if (status?.isConnected) thread.insertBefore(el, status);
   else thread.appendChild(el);
@@ -498,7 +501,8 @@ function render(e, { replay = false } = {}) {
       startTurn(e.at ?? Date.now());
       break;
     case "session_update":
-      hasMessages = true;
+      // Not every update shows (e.g. available_commands_update right after a
+      // new session); append() marks the chat as started when one does.
       renderUpdate(e.update);
       break;
     case "permission_request":

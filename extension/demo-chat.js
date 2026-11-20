@@ -160,7 +160,9 @@ export function connect() {
         case "new_session":
           timers.forEach(clearTimeout);
           state.bridge.busy = false;
-          return emit({ type: "init", state, transcript: [] });
+          emit({ type: "init", state, transcript: [] });
+          // Agents announce their commands right after a new session; nothing shows for it.
+          return event({ type: "session_update", update: { sessionUpdate: "available_commands_update", availableCommands: [] } });
         case "history_list":
           return emit({ type: "history", items: HISTORY });
         case "set_model":
