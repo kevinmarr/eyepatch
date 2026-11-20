@@ -12,6 +12,7 @@ export type FromExtension =
   | { type: "permission_response"; id: string; optionId: string | null }
   | { type: "tool_result"; id: string; result?: unknown; error?: string; warning?: string }
   | { type: "set_model"; tabId: number; value: string }
+  | { type: "set_effort"; tabId: number; value: string }
   | { type: "agent_select"; tabId: number; id: string }
   | { type: "agent_install"; id: string }
   | { type: "agent_remove"; id: string }

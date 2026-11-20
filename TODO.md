@@ -79,8 +79,6 @@ the side panel, or not at all:
 - **Claude Agent picks API key on its own:** setting up Claude Agent never
   asks how to authenticate; it defaults to the API key, and switching to a
   subscription takes Reauthenticate. Ask on first setup when there's a choice.
-- **Effort level:** a way to change the agent's effort (reasoning) level, next
-  to the model picker.
 - **Attach images** to a prompt.
 - **Target tool** in the message box: pick an element on the page to give the
   agent as context.

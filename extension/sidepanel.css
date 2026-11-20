@@ -10,6 +10,8 @@ body { overflow: hidden; }
 .more-menu { top: 38px; right: 0; width: min(318px, calc(100vw - 20px)); }
 .model-menu { bottom: 38px; right: -40px; top: auto; width: min(280px, calc(100vw - 24px)); gap: 2px; }
 .model-menu .search { margin-bottom: 4px; flex: none; }
+.effort-menu { right: -8px; width: 200px; }
+.model-btn .icon:first-child { color: var(--text-faint); }
 .menu-item .check { margin-left: auto; color: var(--text); }
 .menu-item > .icon { color: var(--text-muted); }
 

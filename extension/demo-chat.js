@@ -12,6 +12,7 @@ const state = {
   bridge: { connected: true, agentId: "claude-acp", agent: "Claude Agent", ready: true, busy: false, needsAgent: false },
   auth: null,
   model: { current: "sonnet-5-5", options: MODELS },
+  effort: { current: "high", options: ["Default", "Low", "Medium", "High", "Xhigh", "Max"].map((name) => ({ value: name.toLowerCase(), name })) },
   agents: {
     selected: "claude-acp",
     list: [
@@ -167,6 +168,9 @@ export function connect() {
           return emit({ type: "history", items: HISTORY });
         case "set_model":
           state.model.current = msg.value;
+          return emit({ type: "state", state });
+        case "set_effort":
+          state.effort.current = msg.value;
           return emit({ type: "state", state });
         case "mod_set_enabled":
           state.mods.find((m) => m.id === msg.id).enabled = msg.enabled;

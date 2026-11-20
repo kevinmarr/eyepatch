@@ -202,7 +202,10 @@ export class Chats {
         this.permissions.get(msg.id)?.(msg.optionId);
         break;
       case "set_model":
-        void this.setModel(msg.tabId, msg.value);
+        void this.setOption(msg.tabId, "model", msg.value);
+        break;
+      case "set_effort":
+        void this.setOption(msg.tabId, "effort", msg.value);
         break;
       case "agent_select":
         void this.setAgent(msg.tabId, msg.id);
@@ -401,7 +404,8 @@ export class Chats {
         ready: Boolean(agent?.ready),
         busy: chat.busy,
         sessionId: chat.sessionId ?? null,
-        model: this.modelView(chat),
+        model: this.optionView(chat, "model"),
+        effort: this.optionView(chat, "effort"),
       },
     });
   }
@@ -536,10 +540,12 @@ export class Chats {
     if (acceptEdits) {
       await conn.agent.request(acp.methods.agent.session.setMode, { sessionId: res.sessionId, modeId: acceptEdits.id });
     }
-    // Use the model last picked for this agent.
-    const preferred = this.catalog.preferredModel(agentId);
-    const opt = this.modelOption(chat);
-    if (opt && preferred && preferred !== opt.currentValue && this.flatOptions(opt).some((o) => o.value === preferred)) {
+    // Use the model and effort last picked for this agent (model first: the
+    // effort levels on offer can depend on it).
+    for (const kind of ["model", "effort"] as const) {
+      const preferred = this.catalog.preferred(kind, agentId);
+      const opt = this.selectOption(chat, kind);
+      if (!opt || !preferred || preferred === opt.currentValue || !this.flatOptions(opt).some((o) => o.value === preferred)) continue;
       try {
         const set = await conn.agent.request(acp.methods.agent.session.setConfigOption, {
           sessionId: res.sessionId,
@@ -548,7 +554,7 @@ export class Chats {
         });
         chat.configOptions = set.configOptions;
       } catch (e) {
-        console.warn(`[${agentId}] couldn't restore the model:`, (e as Error).message);
+        console.warn(`[${agentId}] couldn't restore the ${kind}:`, (e as Error).message);
       }
     }
     this.sendChat(chat);
@@ -676,19 +682,21 @@ export class Chats {
     }
   }
 
-  // ---------- model ----------
+  // ---------- model and effort ----------
 
-  private modelOption(chat: Chat) {
-    const opt = chat.configOptions.find((o) => o.category === "model" && o.type === "select");
+  /** The agent's model picker, or its effort (reasoning) level, if it has one. */
+  private selectOption(chat: Chat, kind: "model" | "effort") {
+    const category = kind === "model" ? "model" : "thought_level";
+    const opt = chat.configOptions.find((o) => o.category === category && o.type === "select");
     return opt?.type === "select" ? opt : undefined;
   }
 
-  private flatOptions(opt: NonNullable<ReturnType<Chats["modelOption"]>>) {
+  private flatOptions(opt: NonNullable<ReturnType<Chats["selectOption"]>>) {
     return opt.options.flatMap((o) => ("group" in o ? o.options : [o]));
   }
 
-  private modelView(chat: Chat) {
-    const opt = this.modelOption(chat);
+  private optionView(chat: Chat, kind: "model" | "effort") {
+    const opt = this.selectOption(chat, kind);
     if (!opt) return null;
     return {
       current: opt.currentValue,
@@ -696,11 +704,11 @@ export class Chats {
     };
   }
 
-  private async setModel(tabId: number, value: string) {
+  private async setOption(tabId: number, kind: "model" | "effort", value: string) {
     const chat = this.chat(tabId);
     try {
       const sessionId = await this.ensureSession(chat);
-      const opt = this.modelOption(chat);
+      const opt = this.selectOption(chat, kind);
       const agent = this.agentFor(chat);
       if (!opt || !agent?.conn) return;
       const res = await agent.conn.agent.request(acp.methods.agent.session.setConfigOption, {
@@ -709,9 +717,9 @@ export class Chats {
         value,
       });
       chat.configOptions = res.configOptions;
-      await this.catalog.setPreferredModel(agent.id, value);
+      await this.catalog.setPreferred(kind, agent.id, value);
     } catch (e) {
-      this.error(chat, `Couldn't change the model: ${(e as Error).message}`);
+      this.error(chat, `Couldn't change the ${kind}: ${(e as Error).message}`);
     }
     this.sendChat(chat);
   }

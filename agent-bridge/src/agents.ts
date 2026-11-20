@@ -219,7 +219,7 @@ function checkCanChat(spec: LaunchSpec): Promise<string | null> {
 export class AgentManager {
   private registry: RegistryAgent[] = [];
   private registryError: string | null = null;
-  private settings: { agent?: string; models?: Record<string, string> } = {};
+  private settings: { agent?: string; models?: Record<string, string>; efforts?: Record<string, string> } = {};
   private installed = new Map<string, InstallInfo>(); // id -> newest installed copy
   private installing: InstallProgress | null = null;
   private installError: { id: string; message: string } | null = null;
@@ -292,13 +292,14 @@ export class AgentManager {
     return this.registry.find((a) => a.id === id)?.name ?? id;
   }
 
-  /** The model last picked for an agent. */
-  preferredModel(id: string): string | undefined {
-    return this.settings.models?.[id];
+  /** The model or effort level last picked for an agent. */
+  preferred(kind: "model" | "effort", id: string): string | undefined {
+    return this.settings[kind === "model" ? "models" : "efforts"]?.[id];
   }
 
-  async setPreferredModel(id: string, value: string) {
-    this.settings.models = { ...this.settings.models, [id]: value };
+  async setPreferred(kind: "model" | "effort", id: string, value: string) {
+    const key = kind === "model" ? "models" : "efforts";
+    this.settings[key] = { ...this.settings[key], [id]: value };
     await this.saveSettings();
   }
 

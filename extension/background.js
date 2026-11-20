@@ -201,6 +201,7 @@ function state(tabId) {
     },
     auth: chat?.agentId ? (auths.get(chat.agentId) ?? null) : null,
     model: chat?.model ?? null,
+    effort: chat?.effort ?? null,
     agents: agents && { ...agents, selected: chat?.agentId ?? null },
     userScripts: userScriptsAvailable(),
     modErrors,
@@ -277,6 +278,7 @@ chrome.runtime.onConnect.addListener((port) => {
         send({ type: "new_session", tabId });
         break;
       case "set_model":
+      case "set_effort":
       case "agent_select":
       case "history_list":
         send({ ...msg, tabId });

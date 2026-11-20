@@ -24,7 +24,7 @@ let state = null;
 let port = null;
 let history = null; // past chats, newest first; fetched when the menu opens
 let hasMessages = false;
-let openMenu = null; // "agent" | "more" | "model"
+let openMenu = null; // "agent" | "more" | "model" | "effort"
 
 const hostOf = (url) => {
   try {
@@ -103,7 +103,8 @@ function setState(s) {
   input.disabled = c.connected && c.needsAgent;
 
   renderAlerts();
-  renderModel(s.model);
+  renderPicker("model");
+  renderPicker("effort");
   renderAgentMenu();
   renderMoreMenu();
   renderEmpty();
@@ -193,9 +194,10 @@ function setMenu(name) {
   openMenu = name;
   renderAgentMenu();
   renderMoreMenu();
-  renderModelMenu();
+  renderPickerMenu("model");
+  renderPickerMenu("effort");
 }
-for (const [btn, name] of [["agent", "agent"], ["more", "more"], ["model", "model"]]) {
+for (const [btn, name] of [["agent", "agent"], ["more", "more"], ["model", "model"], ["effort", "effort"]]) {
   $(btn).addEventListener("click", (e) => {
     e.stopPropagation();
     setMenu(openMenu === name ? null : name);
@@ -343,55 +345,71 @@ $("all-list").addEventListener("click", (e) => {
   port.postMessage({ type: "history_restore", sessionId: t.dataset.session });
 });
 
-// ---------- model picker ----------
+// ---------- model and effort pickers ----------
 
-function renderModel(model) {
-  const el = $("model");
-  el.hidden = !model?.options.length;
+// Agents name effort levels plainly ("Xhigh"); spell that one out.
+const optionName = (o) => (o.name === "Xhigh" ? "Extra high" : o.name);
+
+const PICKERS = {
+  model: { label: "Model", lead: "" },
+  effort: { label: "Effort", lead: icon("gauge", { size: 14 }) },
+};
+
+function renderPicker(kind) {
+  const el = $(kind);
+  const pick = state?.[kind];
+  el.hidden = !pick?.options.length;
   if (el.hidden) return;
-  const current = model.options.find((o) => o.value === model.current);
-  el.innerHTML = `<span>${esc(current?.name ?? "Model")}</span>${icon("chevron-down", { size: 13 })}`;
-  el.title = current?.description ?? "";
-  el.setAttribute("aria-label", `Model: ${current?.name ?? ""}`);
-  renderModelMenu();
+  const current = pick.options.find((o) => o.value === pick.current);
+  const name = current ? optionName(current) : PICKERS[kind].label;
+  el.innerHTML = `${PICKERS[kind].lead}<span>${esc(name)}</span>${icon("chevron-down", { size: 13 })}`;
+  el.title = kind === "effort" ? `Effort: ${name}` : (current?.description ?? "");
+  el.setAttribute("aria-label", `${PICKERS[kind].label}: ${name}`);
+  renderPickerMenu(kind);
 }
 
-function renderModelMenu() {
-  const el = $("model-menu");
-  const model = state?.model;
-  const open = openMenu === "model" && Boolean(model?.options.length);
+function renderPickerMenu(kind) {
+  const el = $(`${kind}-menu`);
+  const pick = state?.[kind];
+  const open = openMenu === kind && Boolean(pick?.options.length);
   el.hidden = !open;
-  $("model").setAttribute("aria-expanded", String(open));
+  $(kind).setAttribute("aria-expanded", String(open));
   if (!open) return;
-  const filterable = model.options.length > 10;
+  const filterable = pick.options.length > 10;
   if (!el.dataset.open) {
     el.dataset.open = "1";
-    el.innerHTML = (filterable ? `<label class="search">${icon("search", { size: 16 })}<input type="search" placeholder="Filter models" aria-label="Filter models" /></label>` : "") + `<div class="model-list"></div>`;
-    el.querySelector("input")?.addEventListener("input", renderModelList);
+    el.innerHTML =
+      (kind === "effort" ? `<p class="menu-label">Effort</p>` : "") +
+      (filterable ? `<label class="search">${icon("search", { size: 16 })}<input type="search" placeholder="Filter models" aria-label="Filter models" /></label>` : "") +
+      `<div class="model-list"></div>`;
+    el.querySelector("input")?.addEventListener("input", () => renderPickerList(kind));
     queueMicrotask(() => el.querySelector("input")?.focus());
   }
-  renderModelList();
+  renderPickerList(kind);
 }
-function renderModelList() {
-  const el = $("model-menu");
-  const model = state.model;
+function renderPickerList(kind) {
+  const el = $(`${kind}-menu`);
+  const pick = state[kind];
   const q = el.querySelector("input")?.value.trim().toLowerCase() ?? "";
-  el.querySelector(".model-list").innerHTML = model.options
+  el.querySelector(".model-list").innerHTML = pick.options
     .filter((o) => !q || o.name.toLowerCase().includes(q))
     .map(
       (o) =>
-        `<button type="button" class="menu-item" role="option" aria-selected="${o.value === model.current}" data-value="${esc(o.value)}" title="${esc(o.description ?? "")}">` +
-        `<span class="grow">${esc(o.name)}</span>${o.value === model.current ? icon("check", { cls: "check" }) : ""}</button>`,
+        `<button type="button" class="menu-item" role="option" aria-selected="${o.value === pick.current}" data-value="${esc(o.value)}" title="${esc(o.description ?? "")}">` +
+        `<span class="grow">${esc(optionName(o))}</span>${o.value === pick.current ? icon("check", { cls: "check" }) : ""}</button>`,
     )
     .join("");
 }
-$("model-menu").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-value]");
-  if (!t) return;
-  port.postMessage({ type: "set_model", value: t.dataset.value });
-  setMenu(null);
-});
-new MutationObserver(() => $("model-menu").hidden && delete $("model-menu").dataset.open).observe($("model-menu"), { attributes: true, attributeFilter: ["hidden"] });
+for (const kind of Object.keys(PICKERS)) {
+  const menu = $(`${kind}-menu`);
+  menu.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-value]");
+    if (!t) return;
+    port.postMessage({ type: `set_${kind}`, value: t.dataset.value });
+    setMenu(null);
+  });
+  new MutationObserver(() => menu.hidden && delete menu.dataset.open).observe(menu, { attributes: true, attributeFilter: ["hidden"] });
+}
 
 // ---------- empty chat ----------
 
