@@ -9,7 +9,7 @@ body { overflow: hidden; }
 .agent-menu { top: 40px; left: 0; width: 260px; }
 .more-menu { top: 38px; right: 0; width: min(318px, calc(100vw - 20px)); }
 .model-menu { bottom: 38px; right: -40px; top: auto; width: min(280px, calc(100vw - 24px)); gap: 2px; }
-.model-menu .field { width: 100%; height: 34px; margin-bottom: 4px; }
+.model-menu .search { margin-bottom: 4px; flex: none; }
 .menu-item .check { margin-left: auto; color: var(--text); }
 .menu-item > .icon { color: var(--text-muted); }
 
@@ -53,8 +53,6 @@ body { overflow: hidden; }
 .all-chats { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 20; }
 .all-chats h1 { margin: 0; font-size: 15px; font-weight: 600; }
 .all-search { padding: 0 12px 8px; }
-.all-search .field { width: 100%; }
 .all-list { flex: 1; overflow-y: auto; padding: 4px 6px 16px; display: flex; flex-direction: column; gap: 14px; }
 .all-list .menu-label { padding-top: 4px; }
 
-textarea#input { min-height: 24px; }

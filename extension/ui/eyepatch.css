@@ -259,6 +259,7 @@ svg.icon { flex: none; display: block; }
 .composer textarea {
   width: 100%; resize: none; border: 0; outline: none; padding: 0 6px; margin: 0; background: transparent;
   font-size: var(--fs-input); line-height: 1.5; caret-color: var(--text); max-height: 40vh;
+  min-height: calc(2 * 1.5em); /* two lines, like the designs, before it grows */
 }
 .composer-bar { display: flex; align-items: center; gap: 4px; }
 .composer-bar .spacer { flex: 1; }
@@ -398,6 +399,11 @@ button.tool:hover { background: var(--surface); }
 .terminal { margin: 0; padding: 12px 14px; border-radius: var(--r-lg); background: var(--code); font-family: var(--mono); font-size: var(--fs-code); line-height: var(--lh-code); color: var(--text-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .field { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); outline: none; }
 .field:focus { border-color: var(--text-faint); }
+/* Search and filter boxes: gray, with a search icon. <label class="search">icon<input type="search"></label> */
+.search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: var(--r-md); background: var(--surface); color: var(--text-faint); cursor: text; }
+.search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; padding: 0; background: transparent; color: var(--text); font-size: var(--fs-ui); }
+.search input::-webkit-search-cancel-button { display: none; }
+body:not(.pointer) .search:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
 .progress { height: 4px; border-radius: 2px; background: var(--surface); overflow: hidden; }
 .progress > span { display: block; height: 100%; background: var(--inverse); border-radius: 2px; }
 

@@ -365,7 +365,7 @@ function renderModelMenu() {
   const filterable = model.options.length > 10;
   if (!el.dataset.open) {
     el.dataset.open = "1";
-    el.innerHTML = (filterable ? `<input class="field" type="search" placeholder="Filter models" aria-label="Filter models" />` : "") + `<div class="model-list"></div>`;
+    el.innerHTML = (filterable ? `<label class="search">${icon("search", { size: 16 })}<input type="search" placeholder="Filter models" aria-label="Filter models" /></label>` : "") + `<div class="model-list"></div>`;
     el.querySelector("input")?.addEventListener("input", renderModelList);
     queueMicrotask(() => el.querySelector("input")?.focus());
   }
