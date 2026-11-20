@@ -6,7 +6,7 @@ import type { AgentManager } from "./agents.js";
 import { AUTH_REQUIRED } from "./auth.js";
 import type { ToolSocket } from "./tool-socket.js";
 import { HOME, MODS_DIR } from "./config.js";
-import type { ExtensionSocket, FromExtension, PageInfo, PromptImage } from "./extension-socket.js";
+import type { ExtensionSocket, FromExtension, PageInfo, PickedElement, PromptImage } from "./extension-socket.js";
 import { modApplies } from "./match.js";
 import { loadMods, type Mod } from "./mods.js";
 
@@ -102,6 +102,16 @@ async function pageContext(page: PageInfo) {
   return lines.join("\n") + "\n\n";
 }
 
+/** Elements the user picked on the page, so the agent knows what "this" refers to. */
+function pickedContext(elements: PickedElement[]) {
+  if (!elements.length) return "";
+  const parts = elements.map(
+    (e) =>
+      `<selected-element selector="${attr(e.selector)}">\n${e.html ?? ""}${e.text ? `\n<text>${e.text}</text>` : ""}\n</selected-element>`,
+  );
+  return `The user picked ${elements.length === 1 ? "this element" : "these elements"} on the page:\n${parts.join("\n")}\n\n`;
+}
+
 /** The mod a file path belongs to, if it's inside the mods dir. */
 function modIdOf(file: unknown): string | null {
   if (typeof file !== "string") return null;
@@ -184,7 +194,7 @@ export class Chats {
         void this.close(msg.tabId);
         break;
       case "prompt":
-        void this.prompt(msg.tabId, msg.text, msg.page, msg.images);
+        void this.prompt(msg.tabId, msg.text, msg.page, msg.images, msg.elements);
         break;
       case "cancel":
         void this.cancel(msg.tabId);
@@ -619,7 +629,7 @@ export class Chats {
     this.emit(chat, { type: "session_update", update });
   }
 
-  private async prompt(tabId: number, text: string, page?: PageInfo, images: PromptImage[] = []) {
+  private async prompt(tabId: number, text: string, page?: PageInfo, images: PromptImage[] = [], elements: PickedElement[] = []) {
     const chat = this.chat(tabId);
     const agent = this.agentFor(chat);
     if (!agent) return this.error(chat, "Choose an agent first.");
@@ -636,13 +646,19 @@ export class Chats {
     chat.url ??= page?.url;
     // The chat keeps thumbnails only; the full images go to the agent.
     const thumbs = images.map((i) => i.thumb).filter(Boolean);
-    this.emit(chat, { type: "user_message", text, url: page?.url, ...(thumbs.length ? { images: thumbs } : {}) });
+    this.emit(chat, {
+      type: "user_message",
+      text,
+      url: page?.url,
+      ...(thumbs.length ? { images: thumbs } : {}),
+      ...(elements.length ? { elements: elements.map((e) => ({ selector: e.selector, label: e.label })) } : {}),
+    });
     this.sendChat(chat);
     try {
       const sessionId = await this.ensureSession(chat);
       const context = page ? await pageContext(page) : "";
       const prompt: acp.ContentBlock[] = [
-        { type: "text", text: context + text },
+        { type: "text", text: context + pickedContext(elements) + text },
         ...images.map((i): acp.ContentBlock => ({ type: "image", mimeType: i.mimeType, data: i.data })),
       ];
       const res = await agent.conn!.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt });

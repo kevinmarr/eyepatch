@@ -25,6 +25,9 @@ let port = null;
 let history = null; // past chats, newest first; fetched when the menu opens
 let hasMessages = false;
 let openMenu = null; // "agent" | "more" | "model" | "effort"
+let attachments = []; // images for the next message: { mimeType, data, thumb }
+let picked = []; // elements picked on the page for the next message: { selector, label, html, text }
+let picking = false;
 
 const hostOf = (url) => {
   try {
@@ -47,6 +50,8 @@ function connectPort() {
       setState(msg.state);
     } else if (msg.type === "event") {
       render(msg.event);
+    } else if (msg.type === "picked") {
+      onPicked(msg.element);
     } else if (msg.type === "history") {
       history = msg.items;
       renderMoreMenu();
@@ -102,6 +107,7 @@ function setState(s) {
   $("send").disabled = !hasAgent || !c.ready || needsAuth(s);
   input.disabled = c.connected && c.needsAgent;
   $("attach").hidden = !c.images;
+  renderTarget();
 
   renderAlerts();
   renderPicker("model");
@@ -157,6 +163,7 @@ async function updatePage() {
   $("page").querySelector("span").textContent = label;
   $("page").title = [tab.title, tab.url].filter(Boolean).join("\n");
   renderMoreMenu();
+  renderTarget();
 }
 if (!DEMO) chrome.tabs.onUpdated.addListener((id, info) => id === TAB_ID && (info.url || info.title) && updatePage());
 updatePage();
@@ -172,9 +179,10 @@ input.addEventListener("input", autosize);
 function submit(text = input.value.trim()) {
   const images = state?.bridge.images ? attachments : [];
   if ((!text && !images.length) || !state?.bridge.ready || state.bridge.busy || needsAuth(state)) return;
-  port.postMessage({ type: "prompt", text, images: images.length ? images : undefined });
+  port.postMessage({ type: "prompt", text, images: images.length ? images : undefined, elements: picked.length ? picked : undefined });
   input.value = "";
   attachments = [];
+  picked = [];
   renderAttachments();
   autosize();
 }
@@ -196,7 +204,6 @@ $("new").addEventListener("click", () => port.postMessage({ type: "new_session" 
 const MAX_IMAGES = 6;
 const MAX_EDGE = 1568; // the model API downscales anything larger
 const THUMB_EDGE = 160;
-let attachments = []; // { mimeType, data, thumb }
 
 /** Scale an image down to fit `edge` and encode it. JPEG on white for photos and thumbnails, PNG otherwise. */
 function encode(bmp, edge, type) {
@@ -228,22 +235,55 @@ async function addImages(files) {
   renderAttachments();
 }
 
+/** Images and picked elements waiting to go with the next message. */
 function renderAttachments() {
   const el = $("attachments");
-  el.hidden = !attachments.length;
-  el.innerHTML = attachments
-    .map((a, i) => `<div class="attachment"><img src="${a.thumb}" alt="Image ${i + 1}" /><button type="button" class="remove" data-remove="${i}" aria-label="Remove image ${i + 1}">${icon("x", { size: 12, stroke: 2.5 })}</button></div>`)
-    .join("");
+  el.hidden = !attachments.length && !picked.length;
+  el.innerHTML =
+    attachments
+      .map((a, i) => `<div class="attachment"><img src="${a.thumb}" alt="Image ${i + 1}" /><button type="button" class="remove" data-remove="${i}" aria-label="Remove image ${i + 1}">${icon("x", { size: 12, stroke: 2.5 })}</button></div>`)
+      .join("") +
+    picked
+      .map(
+        (p, i) =>
+          `<span class="pill" title="${esc(p.selector)}">${icon("square-dashed-mouse-pointer", { size: 14 })}<span>${esc(p.label)}</span>` +
+          `<button type="button" class="icon-btn remove-el" data-remove-el="${i}" aria-label="Remove ${esc(p.label)}">${icon("x", { size: 13 })}</button></span>`,
+      )
+      .join("");
 }
 $("attachments").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-remove]");
+  const b = e.target.closest("[data-remove], [data-remove-el]");
   if (!b) return;
-  attachments.splice(Number(b.dataset.remove), 1);
+  if (b.dataset.remove != null) attachments.splice(Number(b.dataset.remove), 1);
+  else picked.splice(Number(b.dataset.removeEl), 1);
   renderAttachments();
   input.focus();
 });
 
 $("attach").addEventListener("click", () => $("files").click());
+
+// ---------- picking an element on the page ----------
+
+function pickable() {
+  return /^(https?|file):/.test(tab.url ?? "") && Boolean(state?.bridge.connected);
+}
+
+function renderTarget() {
+  $("target").hidden = !pickable();
+  $("target").setAttribute("aria-pressed", String(picking));
+}
+$("target").addEventListener("click", () => {
+  picking = !picking;
+  port.postMessage({ type: picking ? "pick_element" : "pick_cancel" });
+  renderTarget();
+});
+function onPicked(element) {
+  picking = false;
+  renderTarget();
+  if (element?.selector && !picked.some((p) => p.selector === element.selector)) picked.push(element);
+  renderAttachments();
+  input.focus();
+}
 $("files").addEventListener("change", () => {
   void addImages([...$("files").files]);
   $("files").value = "";
@@ -598,14 +638,21 @@ function render(e, { replay = false } = {}) {
       planEl = null;
       hasMessages = true;
       renderEmpty();
-      if (e.images?.length) {
+      if (e.images?.length || e.elements?.length) {
         const wrap = append(el("div", "user-message"));
-        const imgs = wrap.appendChild(el("div", "message-images"));
-        for (const src of e.images) {
-          if (!/^data:image\/(jpeg|png);base64,/.test(src)) continue;
-          const img = imgs.appendChild(el("img"));
-          img.src = src;
-          img.alt = "Attached image";
+        if (e.images?.length) {
+          const imgs = wrap.appendChild(el("div", "message-images"));
+          for (const src of e.images) {
+            if (!/^data:image\/(jpeg|png);base64,/.test(src)) continue;
+            const img = imgs.appendChild(el("img"));
+            img.src = src;
+            img.alt = "Attached image";
+          }
+        }
+        if (e.elements?.length) {
+          wrap.appendChild(
+            el("div", "message-elements", e.elements.map((p) => `<span class="pill" title="${esc(p.selector)}">${icon("square-dashed-mouse-pointer", { size: 14 })}<span>${esc(p.label)}</span></span>`).join("")),
+          );
         }
         if (e.text) wrap.appendChild(el("p", "bubble")).textContent = e.text;
       } else {

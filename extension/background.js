@@ -258,6 +258,7 @@ chrome.runtime.onConnect.addListener((port) => {
   // Agent Bridge sends the chat (and its history) back; it's the source of truth.
   send({ type: "open_chat", tabId });
   port.onDisconnect.addListener(() => {
+    cancelPick(tabId); // the panel closed mid-pick
     panels.get(tabId)?.delete(port);
     if (!panels.get(tabId)?.size) panels.delete(tabId);
     panelVisible.delete(port);
@@ -267,7 +268,7 @@ chrome.runtime.onConnect.addListener((port) => {
       case "prompt": {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
         urlAtMessage.set(tabId, tab?.url ?? null);
-        send({ type: "prompt", tabId, text: msg.text, images: msg.images, page: tab && { tabId, url: tab.url, title: tab.title } });
+        send({ type: "prompt", tabId, text: msg.text, images: msg.images, elements: msg.elements, page: tab && { tabId, url: tab.url, title: tab.title } });
         break;
       }
       case "cancel":
@@ -294,6 +295,15 @@ chrome.runtime.onConnect.addListener((port) => {
       case "mod_set_enabled":
         send(msg);
         break;
+      case "pick_element": {
+        // Resolves when the user clicks an element in the page, or with null (Escape, or cancelled).
+        const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: pickElement }).catch(() => []);
+        port.postMessage({ type: "picked", element: res?.result ?? null });
+        break;
+      }
+      case "pick_cancel":
+        cancelPick(tabId);
+        break;
       case "tab_response":
         tabRequests.get(msg.id)?.finish(msg.accept ? { accepted: true } : { accepted: false, reason: "the user chose Not now" });
         break;
@@ -314,6 +324,117 @@ chrome.runtime.onConnect.addListener((port) => {
     }
   });
 });
+
+// ---------- picking an element for the message (runs in the page) ----------
+
+function cancelPick(tabId) {
+  chrome.scripting
+    .executeScript({ target: { tabId }, func: () => window.__eyepatchPick?.(null) })
+    .catch(() => {});
+}
+
+/**
+ * Highlight the element under the pointer and resolve with the one clicked:
+ * a selector that finds it, a short label, and snippets of its HTML and text.
+ * Escape resolves with null. Clicks don't reach the page while picking.
+ */
+function pickElement() {
+  window.__eyepatchPick?.(null); // one picker at a time
+  return new Promise((resolve) => {
+    const box = document.createElement("div");
+    const tag = document.createElement("div");
+    const base = "position:fixed;z-index:2147483647;pointer-events:none;box-sizing:border-box;";
+    box.style.cssText = base + "border:2px solid #19191b;background:rgba(25,25,27,.08);border-radius:3px;outline:1px solid #fff;display:none";
+    tag.style.cssText =
+      base + "padding:3px 7px;border-radius:5px;background:#19191b;color:#fff;font:500 12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:none";
+    document.documentElement.append(box, tag);
+    let current = null;
+
+    // "h1.title", "nav#toc", or for a bare tag its text: a “Second link”.
+    const label = (el) => {
+      let s = el.tagName.toLowerCase();
+      if (el.id) return `${s}#${el.id}`;
+      if (typeof el.className === "string" && el.className.trim()) return s + "." + el.className.trim().split(/\s+/).slice(0, 2).join(".");
+      const text = (el.innerText ?? "").trim().replace(/\s+/g, " ");
+      return text ? `${s} “${text.length > 24 ? text.slice(0, 23) + "…" : text}”` : s;
+    };
+    const unique = (sel) => {
+      try {
+        return document.querySelectorAll(sel).length === 1;
+      } catch {
+        return false;
+      }
+    };
+    // Walk up from the element until the selector matches only it.
+    const selectorFor = (el) => {
+      if (el.id && unique(`#${CSS.escape(el.id)}`)) return `#${CSS.escape(el.id)}`;
+      const parts = [];
+      for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
+        let part = n.tagName.toLowerCase();
+        if (n.id && unique(`#${CSS.escape(n.id)}`)) {
+          parts.unshift(`#${CSS.escape(n.id)}`);
+          break;
+        }
+        const classes = [...n.classList].filter((c) => /^[a-z_-][\w-]*$/i.test(c) && c.length < 40).slice(0, 2);
+        if (classes.length) part += classes.map((c) => `.${CSS.escape(c)}`).join("");
+        const same = n.parentElement ? [...n.parentElement.children].filter((c) => c.tagName === n.tagName) : [];
+        if (same.length > 1) part += `:nth-of-type(${same.indexOf(n) + 1})`;
+        parts.unshift(part);
+        if (unique(parts.join(" > "))) break;
+      }
+      return parts.join(" > ");
+    };
+
+    const show = (el) => {
+      current = el;
+      const r = el.getBoundingClientRect();
+      Object.assign(box.style, { display: "block", left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+      tag.textContent = label(el);
+      const above = r.top > 28;
+      Object.assign(tag.style, { display: "block", left: `${Math.max(4, r.left)}px`, top: above ? `${r.top - 26}px` : `${Math.min(innerHeight - 26, r.bottom + 4)}px` });
+    };
+    const finish = (result) => {
+      window.__eyepatchPick = undefined;
+      box.remove();
+      tag.remove();
+      for (const [type, fn] of handlers) removeEventListener(type, fn, true);
+      resolve(result);
+    };
+    const swallow = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    };
+    const handlers = [
+      ["mousemove", (e) => {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        if (el && el !== current && el !== box && el !== tag) show(el);
+      }],
+      ["click", (e) => {
+        swallow(e);
+        const el = current ?? document.elementFromPoint(e.clientX, e.clientY);
+        if (!el) return;
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll("script, style, svg").forEach((n) => (n.tagName === "svg" ? (n.innerHTML = "") : n.remove()));
+        finish({
+          selector: selectorFor(el),
+          label: label(el),
+          html: clone.outerHTML.slice(0, 3000),
+          text: (el.innerText ?? "").trim().replace(/\s+/g, " ").slice(0, 300),
+        });
+      }],
+      ["keydown", (e) => {
+        if (e.key !== "Escape") return;
+        swallow(e);
+        finish(null);
+      }],
+      ["scroll", () => current && show(current)],
+      ...["mousedown", "mouseup", "pointerdown", "pointerup", "auxclick", "dblclick", "contextmenu"].map((t) => [t, swallow]),
+    ];
+    for (const [type, fn] of handlers) addEventListener(type, fn, true);
+    window.__eyepatchPick = finish;
+  });
+}
 
 // ---------- browser tools (called by the agent) ----------
 

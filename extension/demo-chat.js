@@ -117,8 +117,8 @@ export function connect() {
   let timers = [];
   const later = (ms, fn) => timers.push(setTimeout(fn, ms));
 
-  function respond(text, images) {
-    event({ type: "user_message", text, ...(images?.length ? { images: images.map((i) => i.thumb) } : {}) });
+  function respond(text, images, elements) {
+    event({ type: "user_message", text, ...(images?.length ? { images: images.map((i) => i.thumb) } : {}), ...(elements?.length ? { elements } : {}) });
     setBusy(true);
     const words = /slow/i.test(text);
     let t = 600;
@@ -152,7 +152,11 @@ export function connect() {
     postMessage(msg) {
       switch (msg.type) {
         case "prompt":
-          return respond(msg.text, msg.images);
+          return respond(msg.text, msg.images, msg.elements);
+        case "pick_element":
+          return later(800, () => emit({ type: "picked", element: { selector: "article > nav.toc", label: "nav.toc", html: "<nav class=\"toc\"></nav>" } }));
+        case "pick_cancel":
+          return;
         case "cancel":
           timers.forEach(clearTimeout);
           timers = [];
