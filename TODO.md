@@ -69,16 +69,28 @@ the side panel, or not at all:
 
 ## 4. Chrome Web Store
 
-- Real icon (the current one is a placeholder).
+- Store icon and promo images from the Eyepatch mark.
 - Store listing, screenshots, privacy disclosures, and justifications for the
   `userScripts`, `<all_urls>` and (after section 1) `nativeMessaging`
   permissions.
 
-## Later
+## 5. Features and fixes
 
-- **Working indicator:** an animation at the bottom of the chat while the agent
-  works, as part of a design pass. The old status dot was removed.
-- **"Starting agent" state:** removed for now; add back if starting is slow
-  enough to need it.
-- **Python-based agents:** registry agents distributed with `uvx` are hidden
-  from the picker because Agent Bridge can't install them.
+- **Rename to Eyepatch everywhere:** remove every mention of site-modder in
+  the code, including the MCP server and tool names, `~/.site-modder`, the
+  `SITE_MODDER_*` env vars and the repo name.
+- **Tidier tool names:** our browser tools show up raw in the chat (e.g.
+  `mcp__site-modder__run_js`); show them as readable titles ("Run JavaScript
+  in the page").
+- **Claude Agent picks API key on its own:** setting up Claude Agent never
+  asks how to authenticate; it defaults to the API key, and switching to a
+  subscription takes Reauthenticate. Ask on first setup when there's a choice.
+- **Toolbar button toggles the panel:** clicking the extension's icon while
+  the side panel is open should close it.
+- **Effort level:** a way to change the agent's effort (reasoning) level, next
+  to the model picker.
+- **Attach images** to a prompt.
+- **Target tool** in the message box: pick an element on the page to give the
+  agent as context.
+- **See a mod's source:** a way to open a mod's files from Settings (maybe
+  just reveal its folder in Finder).
