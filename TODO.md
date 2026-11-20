@@ -76,9 +76,6 @@ the side panel, or not at all:
 
 ## 5. Features and fixes
 
-- **Rename the local folder** to `eyepatch` (the code and GitHub repo are
-  renamed). Chrome loads the unpacked extension from this path, so load it
-  again afterwards.
 - **Tidier tool names:** our browser tools show up raw in the chat (e.g.
   `mcp__eyepatch__run_js`); show them as readable titles ("Run JavaScript
   in the page").
