@@ -156,7 +156,7 @@ every matching tab.
 
 - Page content is untrusted input to an agent that runs on your machine. File
   edits in the mods dir are auto-accepted. Read-only browser tools and
-  `reload_tab` run without asking. `run_js` always asks in the side panel, even with
+  `reload_tab` run without asking. `run_js` and `navigate` always ask in the side panel, even with
   agents that approve tool calls themselves (Codex); shell commands and
   anything else ask when the agent asks.
 - The WebSocket listens on 127.0.0.1 only and rejects any Origin that isn't a

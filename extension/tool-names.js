@@ -10,6 +10,7 @@ const BROWSER_TOOLS = {
   screenshot: { title: "Take a screenshot", icon: "camera" },
   get_console_logs: { title: "Read the console", icon: "square-terminal" },
   reload_tab: { title: "Reload the page", icon: "refresh-cw" },
+  navigate: { title: "Open a page", icon: "square-arrow-out-up-right" },
 };
 
 /** The browser tool a call is for, if it's one of ours. */
@@ -18,10 +19,10 @@ export function browserTool(title) {
   return m && BROWSER_TOOLS[m[1]] ? { name: m[1], ...BROWSER_TOOLS[m[1]] } : null;
 }
 
-/** A tool call's title as Markdown, e.g. "Find elements `.toc a`". */
+/** A tool call's title as Markdown, e.g. "Find elements `.toc a`", "Open a page `https://…`". */
 export function toolTitle(call) {
   const tool = browserTool(call?.title);
   if (!tool) return call?.title ?? call?.kind ?? "Tool";
-  const selector = call.rawInput?.selector;
-  return typeof selector === "string" && selector && !selector.includes("`") ? `${tool.title} \`${selector}\`` : tool.title;
+  const arg = call.rawInput?.selector ?? call.rawInput?.url;
+  return typeof arg === "string" && arg && !arg.includes("`") ? `${tool.title} \`${arg}\`` : tool.title;
 }

@@ -31,9 +31,9 @@ const UNPROMPTED_BROWSER_TOOL =
   /eyepatch[^a-z0-9]{1,3}(get_tab|get_page_content|query_selector_all|screenshot|get_console_logs|reload_tab)($|[^a-z0-9_])/i;
 
 /** Browser tools the user approves each use of, whatever the agent's own approval settings. */
-const GUARDED_TOOLS: Record<string, string> = { run_js: "Run JavaScript in the page" };
+const GUARDED_TOOLS = ["run_js", "navigate"];
 const guardedToolIn = (title: string) =>
-  Object.keys(GUARDED_TOOLS).find((t) => new RegExp(`eyepatch[^a-z0-9]{1,3}${t}($|[^a-z0-9_])`, "i").test(title));
+  GUARDED_TOOLS.find((t) => new RegExp(`eyepatch[^a-z0-9]{1,3}${t}($|[^a-z0-9_])`, "i").test(title));
 /** How long a permission the agent asked for covers the tool call that follows it. */
 const APPROVAL_WINDOW_MS = 60_000;
 
@@ -510,7 +510,7 @@ export class Chats {
     // Browser tools for this tab only: a stdio MCP server the agent starts,
     // which connects back to Agent Bridge.
     const tools = this.toolSocket.register(async (method, args, options) => {
-      if (GUARDED_TOOLS[method] && !(await this.approveTool(chat, method, args))) {
+      if (GUARDED_TOOLS.includes(method) && !(await this.approveTool(chat, method, args))) {
         throw new Error("The user declined this.");
       }
       return this.extension.callWithWarning(method, { ...(args as object), tabId: chat.tabId }, options);
@@ -795,7 +795,8 @@ export class Chats {
       chat,
       {
         sessionId: chat.sessionId ?? "",
-        toolCall: { toolCallId: `eyepatch-${++this.permissionSeq}`, title: GUARDED_TOOLS[tool], rawInput: args },
+        // Titled like the agent's own requests ("eyepatch.run_js"); the side panel shows a readable name.
+        toolCall: { toolCallId: `eyepatch-${++this.permissionSeq}`, title: `eyepatch.${tool}`, rawInput: args },
         options: [
           { optionId: "allow", name: "Allow", kind: "allow_once" },
           { optionId: "always", name: "Always allow in this chat", kind: "allow_always" },

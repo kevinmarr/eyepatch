@@ -705,6 +705,22 @@ const tools = {
     await reloadAndWait(tab.id);
     return "reloaded";
   },
+
+  async navigate({ tabId, url }) {
+    let target;
+    try {
+      target = new URL(url);
+    } catch {
+      throw new Error(`Not a URL: ${url}`);
+    }
+    if (target.protocol !== "http:" && target.protocol !== "https:") throw new Error("Only http and https pages can be opened.");
+    const tab = await targetTab(tabId);
+    await loadAndWait(tab.id, () => chrome.tabs.update(tab.id, { url: target.href }));
+    const now = await chrome.tabs.get(tab.id);
+    // The agent moved the tab on purpose: later results shouldn't warn that it navigated.
+    urlAtMessage.set(tab.id, now.url);
+    return { url: now.url, title: now.title, status: now.status };
+  },
 };
 
 async function runTool({ id, method, params }) {
@@ -721,7 +737,12 @@ async function runTool({ id, method, params }) {
   }
 }
 
-function reloadAndWait(tabId, timeoutMs = 15000) {
+function reloadAndWait(tabId, timeoutMs) {
+  return loadAndWait(tabId, () => chrome.tabs.reload(tabId), timeoutMs);
+}
+
+/** Start a load in the tab (reload or navigate) and resolve once it completes, or after the timeout. */
+function loadAndWait(tabId, start, timeoutMs = 15000) {
   return new Promise((resolve) => {
     const timer = setTimeout(done, timeoutMs);
     function done() {
@@ -733,7 +754,7 @@ function reloadAndWait(tabId, timeoutMs = 15000) {
       if (id === tabId && info.status === "complete") done();
     }
     chrome.tabs.onUpdated.addListener(listener);
-    chrome.tabs.reload(tabId);
+    Promise.resolve(start()).catch(done);
   });
 }
 

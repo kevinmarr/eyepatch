@@ -160,6 +160,16 @@ export function createBrowserServer(call: BrowserCall): McpServer {
   );
 
   server.registerTool(
+    "navigate",
+    {
+      description:
+        "Load another http(s) URL in this tab and wait for it to finish loading; returns the final URL and title. The user approves each use. Use it to check a mod on other sites or pages it applies to. The tab stays on the new page, and the other tools act on it from then on.",
+      inputSchema: z.object({ url: z.string().describe("Absolute http(s) URL") }),
+    },
+    (args) => browser(call, "navigate", args, undefined, 30_000),
+  );
+
+  server.registerTool(
     "reload_tab",
     {
       description: "Reload the tab (e.g. to see a JS mod run from a clean page).",
