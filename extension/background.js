@@ -857,7 +857,7 @@ async function syncMods(mods, changed, reloadTabs = null) {
   // Lets mods' report scripts message the extension.
   await chrome.userScripts.configureWorld({ messaging: true }).catch((e) => console.warn("[eyepatch] configureWorld:", e));
   const existing = await chrome.userScripts.getScripts();
-  const ours = existing.filter((s) => s.id.startsWith("mod:") || s.id.startsWith("sm:")).map((s) => s.id);
+  const ours = existing.filter((s) => s.id.startsWith("mod:")).map((s) => s.id);
   if (ours.length) await chrome.userScripts.unregister({ ids: ours });
 
   tokenFor = await gm.setMods(mods);

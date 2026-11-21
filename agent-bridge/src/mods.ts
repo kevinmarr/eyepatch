@@ -4,7 +4,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { HOME, MODS_DIR } from "./config.js";
-import { CSS_EXT, convertLegacyMod, isModFile, JS_EXT, parseModFile, parseUserCssMeta, parseUserScriptMeta, type Mod, type RunAt } from "./modfile.js";
+import { CSS_EXT, JS_EXT, parseModFile, parseUserCssMeta, parseUserScriptMeta, type Mod } from "./modfile.js";
 
 export type { Mod } from "./modfile.js";
 
@@ -208,54 +208,6 @@ export function watchDir(dir: string, onChange: () => void) {
   });
 }
 
-// ---------- the old format ----------
-
-/**
- * Mods used to be folders (`<id>/mod.json`, `mod.css`, `mod.js`). Turn each
- * into one .user.css or .user.js file, keep its on/off state, and move the
- * folder to the trash.
- */
-async function migrateLegacyMods() {
-  const entries = await fsp.readdir(MODS_DIR, { withFileTypes: true });
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const dir = path.join(MODS_DIR, e.name);
-    const read = (f: string) => fsp.readFile(path.join(dir, f), "utf8").catch(() => undefined);
-    const raw = await read("mod.json");
-    if (raw === undefined) continue;
-    let meta: Record<string, unknown>;
-    try {
-      meta = JSON.parse(raw);
-    } catch {
-      console.warn(`[mods] not converting ${e.name}/: its mod.json is invalid`);
-      continue;
-    }
-    const matches = Array.isArray(meta.matches) ? meta.matches.filter((m): m is string => typeof m === "string") : [];
-    if (!matches.length) {
-      console.warn(`[mods] not converting ${e.name}/: its mod.json has no matches`);
-      continue;
-    }
-    const { ext, content } = convertLegacyMod(
-      {
-        name: typeof meta.name === "string" ? meta.name : e.name,
-        description: typeof meta.description === "string" ? meta.description : undefined,
-        matches,
-        excludeMatches: Array.isArray(meta.excludeMatches) ? meta.excludeMatches.filter((m): m is string => typeof m === "string") : undefined,
-        runAt: (["document_start", "document_end", "document_idle"].includes(meta.runAt as string) ? meta.runAt : "document_idle") as RunAt,
-        world: meta.world === "main" ? "main" : "isolated",
-      },
-      await read("mod.css"),
-      await read("mod.js"),
-    );
-    const id = await freeName(slug(e.name) || "mod", ext);
-    await fsp.writeFile(path.join(MODS_DIR, id), content);
-    if (meta.enabled === false) await setModEnabled(id, false);
-    await fsp.mkdir(TRASH_DIR, { recursive: true });
-    await fsp.rename(dir, path.join(TRASH_DIR, `${e.name}-${Date.now()}`));
-    console.log(`[mods] converted ${e.name}/ to ${id}`);
-  }
-}
-
 // ---------- the agent's guide ----------
 
 const AGENT_GUIDE = `# Eyepatch mods
@@ -380,7 +332,6 @@ turns mods on and off in the side panel or Settings; don't do it in the file.
 
 export async function ensureModsDir() {
   await fsp.mkdir(MODS_DIR, { recursive: true });
-  await migrateLegacyMods().catch((e) => console.error("[mods] converting old mods failed:", e));
   // Ours to own: rewrite so guide updates reach existing installs. Both names
   // so any ACP agent (Claude Code, Codex, Gemini...) picks it up.
   await fsp.writeFile(path.join(MODS_DIR, "CLAUDE.md"), AGENT_GUIDE);

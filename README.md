@@ -128,9 +128,7 @@ unchanged:
 
 The agent's working directory is `~/.eyepatch/mods`, and `CLAUDE.md`/`AGENTS.md`
 there describe the formats. Whether each mod is on is kept in
-`~/.eyepatch/mods-state.json`, not in the file. Mods from before this format
-(folders with `mod.json`) are converted when Agent Bridge starts. The old
-folders go to `~/.eyepatch/trash/`.
+`~/.eyepatch/mods-state.json`, not in the file.
 
 The Options page lists every mod by site, with an on/off switch, export,
 show-in-folder and delete (deleted mods move to `~/.eyepatch/trash/`), and

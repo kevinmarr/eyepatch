@@ -24,10 +24,7 @@ const EXT = path.resolve(BRIDGE_DIR, "../extension");
 const HERE = fs.mkdtempSync(path.join(os.tmpdir(), "eyepatch-e2e-"));
 const HOME = path.join(HERE, "home");
 const MODS = path.join(HOME, "mods");
-fs.mkdirSync(path.join(MODS, "old-mod"), { recursive: true });
-// An old-format mod, to be converted on startup.
-fs.writeFileSync(path.join(MODS, "old-mod/mod.json"), JSON.stringify({ name: "Old", matches: ["http://127.0.0.1/*"] }));
-fs.writeFileSync(path.join(MODS, "old-mod/mod.css"), "#old { text-decoration: underline; }");
+fs.mkdirSync(MODS, { recursive: true });
 
 let failures = 0;
 const check = (name, ok, detail = "") => {
@@ -40,7 +37,7 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, "http://x");
   if (u.pathname === "/page.html") {
     res.setHeader("content-type", "text/html");
-    return res.end(`<!doctype html><title>t</title><script>window.appState = 7</script><h1 id="t">Hello</h1><p id="old">old</p><div id="out">out</div>`);
+    return res.end(`<!doctype html><title>t</title><script>window.appState = 7</script><h1 id="t">Hello</h1><div id="out">out</div>`);
   }
   if (u.pathname === "/lib.js") return res.end("var LIB = 42;");
   if (u.pathname === "/note.txt") return res.end("a note");
@@ -113,6 +110,9 @@ await page0.waitForTimeout(500);
 const worker = () => ctx.serviceWorkers().find((w) => w.url().includes(id));
 const userScripts = await worker().evaluate(() => { try { chrome.userScripts.getScripts(); return true; } catch { return false; } });
 check("user scripts allowed", userScripts);
+// Chrome has no event for the toggle; Settings (where users turn it on) notices it.
+const settings = await ctx.newPage();
+await settings.goto(`chrome-extension://${id}/options.html`);
 
 // Wait until the mods are registered.
 const registered = async (n) => {
@@ -123,9 +123,9 @@ const registered = async (n) => {
   }
   return [];
 };
-const ids = await registered(12);
-check("mods registered", ids.length === 12, JSON.stringify(ids));
-check("old mod converted", fs.existsSync(path.join(MODS, "old-mod.user.css")) && !fs.existsSync(path.join(MODS, "old-mod")), fs.readdirSync(MODS).join(","));
+const ids = await registered(10);
+await settings.close();
+check("mods registered", ids.length === 10, JSON.stringify(ids));
 
 const page = await ctx.newPage();
 const errors = [];
@@ -142,7 +142,6 @@ const waitDs = async (k, ms = 5000) => {
 const color = (sel) => page.evaluate((s) => getComputedStyle(document.querySelector(s)).color, sel);
 
 check("UserCSS applies", (await color("h1")) === "rgb(255, 0, 0)", await color("h1"));
-check("converted old CSS mod applies", (await page.evaluate(() => getComputedStyle(document.querySelector("#old")).textDecorationLine)) === "underline");
 check("@require", (await waitDs("lib")) === "42", await ds("lib"));
 check("GM_info", (await ds("info")) === "GM test");
 check("isolated world can't see page globals", (await ds("page")) === "undefined", await ds("page"));
@@ -167,7 +166,7 @@ check("GM storage persists across loads", (await waitDs("count")) === "3", await
 const tabId = await worker().evaluate(() => chrome.tabs.query({ url: "http://127.0.0.1/*" }).then((t) => t[0].id));
 await page.waitForTimeout(500);
 const badge = await worker().evaluate((t) => chrome.action.getBadgeText({ tabId: t }), tabId);
-check("badge counts running mods", badge === "5", badge);
+check("badge counts running mods", badge === "4", badge);
 
 // Hot swap: edit the style; the page doesn't reload.
 await page.evaluate(() => (window.marker = 1));
@@ -217,7 +216,7 @@ if (opts) {
   // Settings lists every mod, grouped by site.
   await opts.waitForTimeout(300);
   const listed = await opts.locator("#mods .row .name").allInnerTexts();
-  check("Settings lists the mods", listed.length === 7, JSON.stringify(listed));
+  check("Settings lists the mods", listed.length === 6, JSON.stringify(listed));
 }
 
 if (opts) {

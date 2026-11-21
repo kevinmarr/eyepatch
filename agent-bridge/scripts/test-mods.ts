@@ -1,7 +1,7 @@
 // Run with: npx tsx scripts/test-mods.ts
 import assert from "node:assert/strict";
-import { modApplies, matchesPattern } from "../src/match.js";
-import { convertLegacyMod, parseUserCss, parseUserScript, splitSections } from "../src/modfile.js";
+import { modApplies } from "../src/match.js";
+import { parseUserCss, parseUserScript, splitSections } from "../src/modfile.js";
 
 let passed = 0;
 let failed = 0;
@@ -155,7 +155,7 @@ test("site names from regexes", () => {
   const site = (inc: string) => parseUserScript("a.user.js", userscript(`@include ${inc}`)).site;
   assert.equal(site("/^https?://www\\.example\\.org/\\d+$/"), "example.org");
   assert.equal(site("/127\\.0\\.0\\.1:8123\\/page/"), "127.0.0.1");
-  const css = parseUserCss("x.user.css", convertLegacyMod({ name: "X", matches: ["http://127.0.0.1/*"], runAt: "document_idle", world: "isolated" }, "a{}").content);
+  const css = parseUserCss("x.user.css", `/* ==UserStyle==\n@name X\n==/UserStyle== */\n@-moz-document regexp("http://127\\\\.0\\\\.0\\\\.1(:\\\\d+)?/.*") { a {} }`);
   assert.equal(css.site, "127.0.0.1");
 });
 
@@ -232,59 +232,6 @@ test("@var defaults become custom properties", () => {
 test("preprocessors aren't supported", () => {
   assert.match(parseUserCss("d.user.css", usercss(`a{}`, "@name P\n@preprocessor stylus")).error ?? "", /stylus/);
   assert.match(parseUserCss("d.user.css", `a{}`).error ?? "", /header/);
-});
-
-// ---------- converting old mods ----------
-
-const legacyCases: { matches: string[]; urls: string[] }[] = [
-  { matches: ["https://github.com/*"], urls: ["https://github.com/", "https://github.com/a/b?x", "http://github.com/", "https://gist.github.com/"] },
-  { matches: ["https://*.substack.com/*"], urls: ["https://substack.com/", "https://x.substack.com/p", "http://x.substack.com/", "https://notsubstack.com/"] },
-  { matches: ["*://*.example.com/*"], urls: ["http://example.com/", "https://a.example.com/x", "https://example.org/"] },
-  { matches: ["*://example.com/docs/*"], urls: ["http://example.com/docs/a", "https://example.com/doc", "https://example.com/docs/"] },
-  { matches: ["https://example.com/*bar"], urls: ["https://example.com/x?y=bar", "https://example.com/x", "https://example.com/bar"] },
-  { matches: ["http://localhost/*"], urls: ["http://localhost:3000/app", "http://localhost/", "http://localhost.evil.com/"] },
-  { matches: ["http://127.0.0.1/*"], urls: ["http://127.0.0.1:8123/page.html", "http://127.0.0.2/"] },
-  { matches: ["<all_urls>"], urls: ["https://a.b/c", "file:///tmp/x", "chrome://extensions"] },
-];
-
-for (const { matches, urls } of legacyCases) {
-  test(`legacy CSS mod ${matches} converts exactly`, () => {
-    const { ext, content } = convertLegacyMod({ name: "X", matches, runAt: "document_idle", world: "isolated" }, "a { color: red }");
-    assert.equal(ext, ".user.css");
-    const m = parseUserCss("x.user.css", content);
-    assert.equal(m.error, undefined, content);
-    for (const u of urls) {
-      const want = matches.some((p) => matchesPattern(p, u));
-      assert.equal(modApplies(m, u), want, `${u}\n${content}`);
-    }
-  });
-}
-
-test("legacy JS + CSS mod becomes one userscript", () => {
-  const { ext, content } = convertLegacyMod(
-    { name: "Both", description: "d", matches: ["https://x.com/*"], excludeMatches: ["https://x.com/a/*"], runAt: "document_end", world: "isolated" },
-    "a { content: `${x}` }",
-    "console.log('hi');",
-  );
-  assert.equal(ext, ".user.js");
-  const m = parseUserScript("both.user.js", content);
-  assert.equal(m.error, undefined, content);
-  assert.deepEqual(m.matches, ["https://x.com/*"]);
-  assert.deepEqual(m.excludeMatches, ["https://x.com/a/*"]);
-  assert.equal(m.runAt, "document_end");
-  assert.equal(m.world, "isolated");
-  assert.equal(m.allFrames, false);
-  assert.deepEqual(m.grants, ["addStyle"]);
-  // The CSS survives a template literal.
-  const css = Function("GM_addStyle", `let out; GM_addStyle = (c) => (out = c); ${content.split("// ==/UserScript==")[1].split("console.log")[0]} return out;`)();
-  assert.equal(css.trim(), "a { content: `${x}` }");
-});
-
-test("legacy main-world JS mod keeps the page world", () => {
-  const { content } = convertLegacyMod({ name: "M", matches: ["https://x.com/*"], runAt: "document_start", world: "main" }, undefined, "window.x = 1;");
-  const m = parseUserScript("m.user.js", content);
-  assert.equal(m.world, "main");
-  assert.equal(m.runAt, "document_start");
 });
 
 console.log(failed ? `${failed} failed, ${passed} passed` : `all ${passed} passed`);
