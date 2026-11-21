@@ -142,7 +142,7 @@ export function gmRuntime(ruleMatches, cfg, names, body) {
   const logError = (e) => console.error(tag, e);
   /** Records an exception with the mod's id, for get_console_logs. */
   const report = (e) => {
-    (globalThis.__smConsole ||= []).push({ t: Date.now(), world: cfg.world === "main" ? "page" : "mods", level: "uncaught", text: `${tag} ${e?.stack || e}` });
+    (globalThis.__eyepatchConsole ||= []).push({ t: Date.now(), world: cfg.world === "main" ? "page" : "mods", level: "uncaught", text: `${tag} ${e?.stack || e}` });
   };
   const call = (method, ...args) => {
     if (!isolated) return Promise.reject(new Error(`${method} isn't available to scripts that run in the page (@inject-into page)`));

@@ -689,7 +689,7 @@ const tools = {
   async get_console_logs({ tabId, limit = 50, levels }) {
     if (!userScriptsAvailable()) throw new Error(USER_SCRIPTS_HELP);
     const tab = await targetTab(tabId);
-    const read = `(() => { const b = globalThis.__smConsole; return b ? b.slice() : null; })()`;
+    const read = `(() => { const b = globalThis.__eyepatchConsole; return b ? b.slice() : null; })()`;
     const entries = [];
     let installed = false;
     for (const world of captureWorlds(tab.url)) {
@@ -795,8 +795,8 @@ function captureWorlds(url) {
 function captureCode({ world, worldId }) {
   const source = world === "MAIN" ? { world: "page" } : { world: "mods", ...(worldId && { mod: worldId.slice("mod:".length) }) };
   return `(() => {
-  if (globalThis.__smConsole) return;
-  const buf = (globalThis.__smConsole = []);
+  if (globalThis.__eyepatchConsole) return;
+  const buf = (globalThis.__eyepatchConsole = []);
   const fmt = (a) => {
     try {
       if (a instanceof Error) return a.stack || String(a);

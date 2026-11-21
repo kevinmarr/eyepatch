@@ -182,7 +182,7 @@ await panel.waitForTimeout(800);
 const captured = await worker().evaluate(async (t) => {
   const inGm = (code) => chrome.userScripts.execute({ target: { tabId: t }, js: [{ code }], world: "USER_SCRIPT", worldId: "mod:gm.user.js" }).then((r) => r[0]?.result);
   await inGm(`console.log("from gm")`);
-  return inGm(`(globalThis.__smConsole ?? []).map((e) => e.mod + ": " + e.text).join()`);
+  return inGm(`(globalThis.__eyepatchConsole ?? []).map((e) => e.mod + ": " + e.text).join()`);
 }, tabId);
 check("console capture in a script's world", captured === "gm.user.js: from gm", captured);
 await panel.locator("#more").click();
