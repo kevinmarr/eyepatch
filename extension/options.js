@@ -498,6 +498,7 @@ function previewOf(text) {
     version: get("version"),
     sites: [...new Set(sites)],
     grants: all("grant").flatMap((g) => g.split(/\s+/)).filter((g) => g && g !== "none"),
+    connects: all("connect"),
   };
 }
 
@@ -524,6 +525,7 @@ async function offerInstall(url) {
     p.version && ["Version", esc(p.version)],
     ["Runs on", p.sites.length ? list(p.sites) : "Every site"],
     p.grants.length && ["Uses", list(p.grants, 10)],
+    p.connects.length && ["Can reach", list(p.connects)],
     ["From", esc(new URL(url).host)],
   ].filter(Boolean);
   const show = (error = "") =>

@@ -1,0 +1,246 @@
+{
+  "recordedFrom": "Violentmonkey 2.50.0",
+  "results": {
+    "getValue: missing key gives the default": "dflt",
+    "getValue: missing key without a default": "undefined",
+    "set/get round-trips types": {
+      "s": "str",
+      "n": 42,
+      "z": 0,
+      "f": false,
+      "t": true,
+      "nul": null,
+      "o": {
+        "a": [
+          1,
+          {
+            "b": "c"
+          }
+        ]
+      },
+      "arr": [
+        1,
+        "2"
+      ],
+      "u": "ünï €"
+    },
+    "getValue returns a copy": {
+      "x": 1
+    },
+    "setValue keeps a copy": {
+      "x": 1
+    },
+    "deleteValue": [
+      "gone",
+      false
+    ],
+    "listValues": [
+      "obj",
+      "obj2"
+    ],
+    "getValues with keys": {
+      "obj": {
+        "x": 1
+      }
+    },
+    "getValues with defaults": {
+      "obj": {
+        "x": 1
+      },
+      "missing": "d"
+    },
+    "setValues and deleteValues": [
+      {
+        "m1": 1,
+        "m2": [
+          2
+        ]
+      },
+      {}
+    ],
+    "GM.* storage promises": [
+      {
+        "q": 1
+      },
+      5,
+      true,
+      "gone"
+    ],
+    "GM.* and GM_* share storage": 1,
+    "value change listener (same tab)": {
+      "idType": "string",
+      "calls": [
+        [
+          "watched",
+          null,
+          1,
+          false
+        ],
+        [
+          "watched",
+          1,
+          {
+            "v": 2
+          },
+          false
+        ],
+        [
+          "watched",
+          {
+            "v": 2
+          },
+          null,
+          false
+        ]
+      ]
+    },
+    "value change listener (another tab)": {
+      "key": "cross",
+      "newValue": "from-peer",
+      "remote": true
+    },
+    "xhr: GET same origin": {
+      "kind": "load",
+      "status": 200,
+      "statusText": "OK",
+      "readyState": 4,
+      "finalUrl": "http://127.0.0.1:8124/echo?a=1",
+      "method": "GET",
+      "ctype": true,
+      "seen": [
+        "loadstart",
+        "rs2",
+        "rs4"
+      ]
+    },
+    "xhr: relative URL": "/echo?rel=1",
+    "xhr: cross-origin @connect host": {
+      "kind": "load",
+      "status": 200,
+      "host": "other.test:8124"
+    },
+    "xhr: host not in @connect": {
+      "kind": "load",
+      "status": 200
+    },
+    "xhr: redirect to a host not in @connect": {
+      "kind": "load",
+      "status": 200
+    },
+    "xhr: POST string body and headers": {
+      "method": "POST",
+      "body": "hello",
+      "xtest": "yes",
+      "ctype": "text/plain"
+    },
+    "xhr: URLSearchParams body": {
+      "body": "a=1&b=x+y",
+      "ctype": "application/x-www-form-urlencoded"
+    },
+    "xhr: FormData body": {
+      "multipart": true,
+      "hasField": true,
+      "hasFile": true
+    },
+    "xhr: binary body": "hi",
+    "xhr: responseType json": "GET",
+    "xhr: responseType arraybuffer": [
+      true,
+      [
+        0,
+        1,
+        2,
+        255
+      ]
+    ],
+    "xhr: responseType blob": [
+      true,
+      4,
+      "application/octet-stream",
+      [
+        0,
+        1,
+        2,
+        255
+      ]
+    ],
+    "xhr: responseType document": "Doc",
+    "xhr: responseXML": "X",
+    "xhr: 404 still loads": {
+      "kind": "load",
+      "status": 404
+    },
+    "xhr: follows redirects, finalUrl": {
+      "kind": "load",
+      "status": 200,
+      "finalUrl": "http://other.test:8124/echo?after=1"
+    },
+    "xhr: timeout": "timeout",
+    "xhr: abort": [
+      "function",
+      "abort"
+    ],
+    "xhr: context is passed back": {
+      "c": 1
+    },
+    "xhr: network error": {
+      "kind": "error",
+      "status": 0
+    },
+    "xhr: sends the target's cookies": true,
+    "xhr: anonymous sends no cookies": false,
+    "GM.xmlHttpRequest resolves": [
+      200,
+      "GET"
+    ],
+    "GM.xmlHttpRequest rejects on network error": "rejected",
+    "GM_info": {
+      "name": "GM API suite",
+      "version": "1.0",
+      "namespace": "eyepatch-tests",
+      "grantsGetValue": true,
+      "matches": [
+        "http://127.0.0.1:8124/suite.html*"
+      ],
+      "metaStr": true,
+      "handler": "string",
+      "resources": [
+        "note"
+      ]
+    },
+    "GM.info is GM_info's data": "GM API suite",
+    "addStyle": [
+      true,
+      true,
+      "rgb(1, 2, 3)"
+    ],
+    "addElement with a parent": [
+      "SPAN",
+      true,
+      "hi",
+      "1"
+    ],
+    "addElement without a parent": [
+      "META",
+      true
+    ],
+    "getResourceText": "a note",
+    "getResourceURL": true,
+    "GM.getResourceUrl": true,
+    "registerMenuCommand": [
+      "string",
+      true
+    ],
+    "openInTab handle": [
+      "object",
+      "function",
+      false
+    ],
+    "openInTab opens the tab": true,
+    "document-start: values are ready": {
+      "ran": true,
+      "readyState": "complete",
+      "sawStoredValue": true
+    }
+  }
+}

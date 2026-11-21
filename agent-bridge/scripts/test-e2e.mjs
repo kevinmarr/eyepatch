@@ -71,7 +71,10 @@ write("gm.user.js", `// ==UserScript==
 // @grant GM_getResourceText
 // @grant GM.getResourceUrl
 // @grant GM_getValue
-// @grant GM.setValue
+// @grant GM_setValue
+// @grant GM_registerMenuCommand
+// @grant GM_download
+// @grant GM.download
 // @noframes
 // ==/UserScript==
 const d = document.documentElement.dataset;
@@ -80,8 +83,11 @@ d.info = GM_info.script.name;
 d.page = typeof window.appState;
 d.note = GM_getResourceText("note");
 GM.getResourceUrl("note").then((u) => (d.noteUrl = u.slice(0, 5)));
-try { GM_getValue("x"); } catch (e) { d.stub = e.message; }
-GM.setValue("x", 1).catch((e) => (d.asyncStub = e.message));
+try { GM_download("x"); } catch (e) { d.stub = e.message; }
+GM.download("x").catch((e) => (d.asyncStub = e.message));
+d.count = GM_getValue("count", 0) + 1;
+GM_setValue("count", Number(d.count));
+GM_registerMenuCommand("Mark it", () => (d.menu = "clicked"));
 GM_addStyle("#out { color: rgb(0, 128, 0); }");
 globalThis.secret = "gm's";
 `);
@@ -142,8 +148,9 @@ check("GM_info", (await ds("info")) === "GM test");
 check("isolated world can't see page globals", (await ds("page")) === "undefined", await ds("page"));
 check("GM_getResourceText", (await ds("note")) === "a note", await ds("note"));
 check("GM.getResourceUrl", (await waitDs("noteUrl")) === "data:", await ds("noteUrl"));
-check("unsupported grant stub", /GM_getValue isn't supported/.test((await ds("stub")) ?? ""), await ds("stub"));
-check("unsupported GM.* stub rejects", /GM\.setValue isn't supported/.test((await waitDs("asyncStub")) ?? ""), await ds("asyncStub"));
+check("unsupported grant stub", /GM_download isn't supported/.test((await ds("stub")) ?? ""), await ds("stub"));
+check("unsupported GM.* stub rejects", /GM\.download isn't supported/.test((await waitDs("asyncStub")) ?? ""), await ds("asyncStub"));
+check("GM storage", (await ds("count")) === "1", await ds("count"));
 check("GM_addStyle", (await color("#out")) === "rgb(0, 128, 0)", await color("#out"));
 check("@grant none runs in the page", (await ds("app")) === "7" && (await page.evaluate(() => window.fromMod)) === "hi", await ds("app"));
 check("isolated scripts can't see each other's globals", (await waitDs("peek")) === "undefined", await ds("peek"));
@@ -154,7 +161,7 @@ check("@include regex filter excludes", (await ds("filtered")) === undefined);
 await page.goto("http://127.0.0.1:8123/page.html?yes");
 check("@include regex filter includes", (await waitDs("filtered")) === "yes");
 await page.goto("http://127.0.0.1:8123/page.html");
-await waitDs("info");
+check("GM storage persists across loads", (await waitDs("count")) === "3", await ds("count"));
 
 // Toolbar badge counts the mods running here.
 const tabId = await worker().evaluate(() => chrome.tabs.query({ url: "http://127.0.0.1/*" }).then((t) => t[0].id));
@@ -179,6 +186,13 @@ const captured = await worker().evaluate(async (t) => {
   return inGm(`(globalThis.__smConsole ?? []).map((e) => e.mod + ": " + e.text).join()`);
 }, tabId);
 check("console capture in a script's world", captured === "gm.user.js: from gm", captured);
+await panel.locator("#more").click();
+const cmd = panel.locator("[data-command]", { hasText: "Mark it" });
+check("menu command in side panel", (await cmd.count()) === 1, await panel.locator("#more-menu").innerText().catch(() => ""));
+if (await cmd.count()) {
+  await cmd.click();
+  check("menu command runs", (await waitDs("menu")) === "clicked", await ds("menu"));
+}
 await panel.locator("#more").click();
 await panel.locator('[data-mod="red.user.css"]').click();
 for (let i = 0; i < 40 && (await color("h1")) === "rgb(0, 0, 255)"; i++) await page.waitForTimeout(100);
@@ -240,8 +254,10 @@ const cdp = await ctx.newCDPSession(page);
 await cdp.send("ServiceWorker.enable");
 await cdp.send("ServiceWorker.stopAllWorkers");
 await new Promise((r) => setTimeout(r, 500));
+const before = Number(await ds("count"));
 await page.reload();
 check("scripts run without Agent Bridge, after a worker restart", (await waitDs("lib")) === "42" && (await waitDs("peek")) === "undefined", await ds("lib"));
+check("…with their GM storage", Number(await waitDs("count")) === before + 1, `${before} -> ${await ds("count")}`);
 
 check("no console errors from mods", !errors.some((e) => /\[mod /.test(e)), errors.join("\n"));
 console.log(failures ? `\n${failures} failed` : "\nall passed");

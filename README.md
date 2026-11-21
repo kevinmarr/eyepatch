@@ -157,13 +157,22 @@ against any `#sha256=…`). Supported:
   DOM. Each script gets its own isolated world, so scripts can't see each
   other's globals. `@inject-into page|content` (Violentmonkey) and `@sandbox`
   (Tampermonkey) choose explicitly.
-- **GM API** (`GM_*` and `GM.*`): `addStyle`, `addElement`, `setClipboard`,
-  `getResourceText`, `getResourceURL`, `info` and `log`.
-- **Not supported yet:** other `GM_` functions (storage, `xmlhttpRequest`,
-  menu commands, `openInTab`, `notification`, …) throw an error saying so, and
-  Settings shows the grant as unsupported. `unsafeWindow` is the isolated
-  world's `window`; use `@grant none` or `@inject-into page` for page globals.
-  `@updateURL` updates aren't checked.
+- **GM API** (`GM_*` and `GM.*`): `addStyle`, `addElement`, `getValue`,
+  `setValue`, `deleteValue`, `listValues`, `getValues`, `setValues`,
+  `deleteValues`, `addValueChangeListener` and `removeValueChangeListener`
+  (stored in the extension, synced across tabs, ready at `document-start`),
+  `xmlhttpRequest` (made by the extension, so cross-origin, limited to the
+  page's host and `@connect` hosts, including after redirects),
+  `registerMenuCommand` and `unregisterMenuCommand` (listed under the mod in the
+  side panel's menu), `openInTab` (http and https), `notification`,
+  `setClipboard`, `getResourceText`, `getResourceURL`, `info` and `log`.
+  `npm run test:gm` checks them against Violentmonkey.
+- **Not supported:** other `GM_` functions (`GM_download`, `GM_cookie`, …) throw
+  an error saying so, and Settings shows the grant as unsupported.
+  `unsafeWindow` is the isolated world's `window`; use `@grant none` or
+  `@inject-into page` for page globals. `@updateURL` updates aren't checked.
+  `GM_xmlhttpRequest` can't set forbidden headers (`Cookie`, `User-Agent`, …),
+  and a redirect to a host not in `@connect` is made but its response withheld.
 
 UserCSS styles must be plain CSS: `@var` defaults become CSS custom properties,
 and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
@@ -188,7 +197,11 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
 - **Tests:** `npm test` checks match patterns and mod parsing. `npm run
   test:e2e` loads the extension in Playwright's Chromium with a real Agent
   Bridge and checks that mods run: styles, hot swap, userscripts and their GM
-  functions, install from a URL, import and export. It needs Playwright installed, and port 7457
+  functions, menu commands, install from a URL, import and export.
+  `npm run test:gm` runs `scripts/gm/suite.user.js` and compares every result
+  with `scripts/gm/reference.json`, recorded from Violentmonkey (`npm run
+  test:gm -- --reference <unpacked Violentmonkey MV3>` records it again).
+  Differences on purpose are in `scripts/gm/expected-differences.json`. It needs Playwright installed, and port 7457
   free.
 
 ## Config (env vars)

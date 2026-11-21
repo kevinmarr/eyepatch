@@ -1,6 +1,7 @@
+import { createGmHost } from "./gm.js";
 import { modApplies } from "./match.js";
 import { toolTitle } from "./tool-names.js";
-import { cssCode, removeCssCode, reportCode, scriptsFor, worldIdOf } from "./userscripts.js";
+import { cssCode, removeCssCode, reportCode, scriptsFor, usesStorage, worldIdOf } from "./userscripts.js";
 
 // Eyepatch service worker: owns the WebSocket to Agent Bridge (the local
 // program that runs the agents), runs browser tools for them, registers mods
@@ -25,6 +26,8 @@ let tabRequestSeq = 0;
 let modErrors = {}; // mod id -> registration error
 let lastMods = new Map(); // mod id -> mod, to tell CSS-only changes apart
 let modList = []; // every mod, without its code (for the side panel and Options page)
+let tokenFor = () => undefined; // mod id -> its GM API token (see gm.js)
+const gm = createGmHost({ onMenusChanged: (tabId) => broadcastState(tabId), onValuesChanged: updateModValues });
 const panels = new Map(); // tab id -> Set of ports (that tab's side panel)
 const optionsPages = new Set(); // ports of open Options pages (setup and agents)
 
@@ -48,6 +51,7 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   send({ type: "close_chat", tabId });
   forgetModsRan(tabId);
+  gm.forgetTab(tabId);
   for (const [id, r] of tabRequests) if (r.tabId === tabId) r.finish({ accepted: false, reason: "the tab was closed" });
   chats.delete(tabId);
   transcripts.delete(tabId);
@@ -58,8 +62,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Chrome clears a tab's badge when it navigates; put it back.
 // Console capture is per page load, too: start it again on each new page.
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === "complete") return checkModsRan(tabId);
+  if (info.status === "complete") return checkPage(tabId);
   if (info.status !== "loading") return;
+  gm.navigationStarted(tabId);
   if (attention.has(tabId) || modsRan.has(tabId)) updateBadge(tabId);
   if (hasChat(tabId)) startCapture(tabId, tab.url);
 });
@@ -212,6 +217,7 @@ function state(tabId) {
     userScripts: userScriptsAvailable(),
     modErrors,
     mods: modList,
+    menuCommands: gm.menusFor(tabId),
     sessionId: chat?.sessionId ?? null,
   };
 }
@@ -247,6 +253,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
   port.onMessage.addListener((msg) => {
     if (msg.type === "color_scheme") return setToolbarIcon(msg.dark);
+    if (msg.type === "mod_delete") gm.forget(msg.id);
     if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete", "mod_reveal", "mod_export", "mod_import"].includes(msg.type)) send(msg);
   });
 });
@@ -300,6 +307,9 @@ chrome.runtime.onConnect.addListener((port) => {
       }
       case "mod_set_enabled":
         send(msg);
+        break;
+      case "menu_command":
+        gm.runMenu(tabId, msg.modId, msg.id);
         break;
       case "pick_element": {
         // Resolves when the user clicks an element in the page, or with null (Escape, or cancelled).
@@ -850,6 +860,8 @@ async function syncMods(mods, changed, reloadTabs = null) {
   const ours = existing.filter((s) => s.id.startsWith("mod:") || s.id.startsWith("sm:")).map((s) => s.id);
   if (ours.length) await chrome.userScripts.unregister({ ids: ours });
 
+  tokenFor = await gm.setMods(mods);
+  const version = chrome.runtime.getManifest().version;
   modErrors = {};
   for (const mod of mods) {
     if (mod.error) {
@@ -857,9 +869,11 @@ async function syncMods(mods, changed, reloadTabs = null) {
       continue;
     }
     // Register per mod so one bad match pattern doesn't block the rest.
-    const scripts = scriptsFor(mod, chrome.runtime.getManifest().version);
+    const scripts = scriptsFor(mod, version, tokenFor(mod.id), usesStorage(mod) ? await gm.readValues(mod.id) : undefined);
     if (!scripts.length) continue;
     try {
+      // The GM API messages the extension from the mod's own world.
+      if (mod.kind === "js" && mod.world !== "main") await chrome.userScripts.configureWorld({ worldId: worldIdOf(mod.id), messaging: true });
       await chrome.userScripts.register(scripts);
     } catch (e) {
       modErrors[mod.id] = String(e?.message ?? e);
@@ -1095,7 +1109,8 @@ function forgetModRan(tabId, modId) {
   updateBadge(tabId);
 }
 
-chrome.runtime.onUserScriptMessage?.addListener((msg, sender) => {
+chrome.runtime.onUserScriptMessage?.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "gm") return gm.onMessage(msg, sender, sendResponse);
   const tabId = sender.tab?.id;
   if (msg?.type !== "mod_ran" || typeof msg.id !== "string" || tabId == null || sender.frameId !== 0) return;
   void modsRanLoaded.then(() => {
@@ -1107,16 +1122,28 @@ chrome.runtime.onUserScriptMessage?.addListener((msg, sender) => {
   });
 });
 
+chrome.runtime.onUserScriptConnect?.addListener((port) => gm.onConnect(port));
+
+/** A mod's stored values changed: register its script with them, for new pages. */
+async function updateModValues(modId, values) {
+  const mod = lastMods.get(modId);
+  if (!mod || mod.error || !mod.enabled || !userScriptsAvailable()) return;
+  const js = scriptsFor(mod, chrome.runtime.getManifest().version, tokenFor(modId), values).find((s) => s.id.endsWith(":js"));
+  if (js) await chrome.userScripts.update([js]).catch((e) => console.warn(`[eyepatch] ${modId}:`, e));
+}
+
 /**
- * A tab finished loading. If it's on a new page that no mod reported from,
- * its count is stale. Only tabs where a mod ran are checked.
+ * A tab finished loading. If it's on a new page, the mods that reported from
+ * the old one (and its menu commands) are stale.
  */
-async function checkModsRan(tabId) {
+async function checkPage(tabId) {
   await modsRanLoaded;
   const r = modsRan.get(tabId);
-  if (!r) return;
+  const commands = gm.menusFor(tabId).length;
+  if (!r && !commands) return;
   const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: () => 0 }).catch(() => []);
-  if (res?.documentId === r.documentId) return;
+  if (commands) gm.pruneMenus(tabId, res?.documentId);
+  if (!r || res?.documentId === r.documentId) return;
   forgetModsRan(tabId);
   updateBadge(tabId);
 }

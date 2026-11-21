@@ -197,8 +197,8 @@ with the error. Typical counts: a few to a few dozen. Below the list, **Import
 a mod** takes userscripts (`.user.js`) and UserCSS styles (`.user.css`).
 
 Opening a `.user.js` or `.user.css` URL opens Settings with an install dialog:
-the mod's name and description, the sites it runs on, the GM functions it uses,
-and Install / Cancel.
+the mod's name and description, the sites it runs on, the GM functions it uses
+and the hosts it can reach, and Install / Cancel.
 
 ## 3. Toolbar button
 

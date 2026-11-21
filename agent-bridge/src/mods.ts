@@ -318,14 +318,18 @@ GM_addStyle(\`.Layout-sidebar { display: none !important; }\`);
   \`@include\` / \`@exclude\` globs and \`/regexes/\` work too, but prefer \`@match\`.
 - \`@inject-into content\` (use this by default) runs in an isolated world that sees
   the DOM only. Use \`@inject-into page\` only when the script must touch the page's
-  own JS globals. Without \`@inject-into\`, a script that grants nothing runs in
-  the page, as in Tampermonkey.
+  own JS globals; GM functions that need the extension (storage, requests, menu
+  commands, tabs, notifications) don't work there. Without \`@inject-into\`, a
+  script that grants nothing runs in the page, as in Tampermonkey.
 - Add \`@noframes\` unless the script should also run inside iframes.
 - \`@grant\` each GM function you use. Supported: \`GM_addStyle\`, \`GM_addElement\`,
-  \`GM_setClipboard\`, \`GM_getResourceText\`/\`GM_getResourceURL\`, \`GM_info\`,
-  \`GM_log\`, and the \`GM.*\` promise versions of each. Other GM functions
-  (storage, \`GM_xmlhttpRequest\`, menu commands) aren't available yet: keep
-  state in \`localStorage\` and use \`fetch\` for same-origin requests.
+  \`GM_getValue\`/\`GM_setValue\`/\`GM_deleteValue\`/\`GM_listValues\` (persistent
+  storage, also \`GM_getValues\`/\`GM_setValues\`/\`GM_deleteValues\` and
+  \`GM_addValueChangeListener\`), \`GM_xmlhttpRequest\` (cross-origin requests;
+  list each host it reaches with \`@connect example.com\`), \`GM_registerMenuCommand\`
+  (shows in the side panel's menu under the mod), \`GM_openInTab\`,
+  \`GM_notification\`, \`GM_setClipboard\`, \`GM_getResourceText\`/\`GM_getResourceURL\`,
+  \`GM_info\`, \`GM_log\`, and the \`GM.*\` promise versions of each.
 - \`@require <url>\` and \`@resource <name> <url>\` are downloaded once and cached.
 - Changes reload the tab whose agent made them.
 

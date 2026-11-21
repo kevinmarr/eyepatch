@@ -69,13 +69,18 @@ test("GM grants in both spellings; unknown ones warn", () => {
     @grant unsafeWindow
     @grant window.close
   `));
-  assert.deepEqual(m.grants?.sort(), ["addStyle", "getResourceURL"]);
-  assert.deepEqual(m.warnings, ["unsupported @grant: GM.getValue, GM_setValue, GM.xmlHttpRequest, GM_download"]);
+  assert.deepEqual(m.grants?.sort(), ["addStyle", "getResourceURL", "getValue", "setValue", "xmlhttpRequest"]);
+  assert.deepEqual(m.warnings, ["unsupported @grant: GM_download"]);
   assert.equal(m.world, "isolated");
 });
 
+test("page-world scripts can't use extension GM functions", () => {
+  const m = parseUserScript("a.user.js", userscript(`@match https://x.com/*\n@grant GM_setValue\n@grant GM_addStyle\n@inject-into page`));
+  assert.match(m.warnings?.join() ?? "", /GM_setValue can't work/);
+});
+
 test("any grant but none means the isolated world, even an unsupported one", () => {
-  assert.equal(parseUserScript("a.user.js", userscript(`@match https://x.com/*\n@grant GM_setValue`)).world, "isolated");
+  assert.equal(parseUserScript("a.user.js", userscript(`@match https://x.com/*\n@grant GM_download`)).world, "isolated");
   assert.equal(parseUserScript("a.user.js", userscript(`@match https://x.com/*\n@grant none`)).world, "main");
 });
 
@@ -127,17 +132,19 @@ test("errors: no header, nowhere to run", () => {
   assert.match(parseUserScript("a.user.js", userscript(`@name x`)).error ?? "", /@match/);
 });
 
-test("@require, @resource and GM_info", () => {
+test("@require, @resource, @connect and GM_info", () => {
   const m = parseUserScript("a.user.js", userscript(`
     @name X
     @namespace me
     @match https://x.com/*
     @require https://cdn.example/jquery.js#sha256=abc
     @resource logo https://cdn.example/logo.png
-    @grant GM_getResourceText
+    @connect api.example.com
+    @grant GM_xmlhttpRequest
   `));
   assert.deepEqual(m.requireUrls, ["https://cdn.example/jquery.js#sha256=abc"]);
   assert.deepEqual(m.resourceUrls, { logo: "https://cdn.example/logo.png" });
+  assert.deepEqual(m.connects, ["api.example.com"]);
   const script = (m.info as { script: Record<string, unknown> }).script;
   assert.equal(script.namespace, "me");
   assert.equal(script.noframes, false);

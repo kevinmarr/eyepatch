@@ -39,8 +39,10 @@ export type Mod = {
 
   // .user.js
   js?: string;
-  /** GM API functions the script may use, without the GM_/GM. prefix (e.g. "addStyle"). */
+  /** GM API functions the script may use, without the GM_/GM. prefix (e.g. "xmlhttpRequest"). */
   grants?: string[];
+  /** Hosts GM_xmlhttpRequest may reach (`@connect`). */
+  connects?: string[];
   requireUrls?: string[];
   resourceUrls?: Record<string, string>;
   /** Filled in by resolveAssets: the code of each @require, in order. */
@@ -208,13 +210,18 @@ const baseName = (id: string) => id.replace(/\.user\.(js|css)$/, "");
 
 // ---------- .user.js ----------
 
-/**
- * GM functions Eyepatch provides, by lowercased name without the prefix. Only
- * ones that need nothing from the extension, so they work in either world.
- */
+/** GM functions Eyepatch provides, by lowercased name without the prefix. */
 const GM_FUNCTIONS: Record<string, string> = Object.fromEntries(
-  ["addStyle", "addElement", "getResourceText", "getResourceURL", "setClipboard", "log", "info"].map((n) => [n.toLowerCase(), n]),
+  [
+    "getValue", "setValue", "deleteValue", "listValues", "getValues", "setValues", "deleteValues",
+    "addValueChangeListener", "removeValueChangeListener",
+    "addStyle", "addElement", "getResourceText", "getResourceURL",
+    "xmlhttpRequest", "openInTab", "notification", "setClipboard",
+    "registerMenuCommand", "unregisterMenuCommand", "log", "info",
+  ].map((n) => [n.toLowerCase(), n]),
 );
+/** Ones that work without the extension, so also in the page's world. */
+const LOCAL_FUNCTIONS = new Set(["addStyle", "addElement", "getResourceText", "getResourceURL", "setClipboard", "log", "info"]);
 /** Grants that aren't GM functions and need nothing from us. */
 const PLAIN_GRANTS = new Set(["none", "unsafewindow", "window.close", "window.focus", "window.onurlchange"]);
 
@@ -250,6 +257,10 @@ export function parseUserScript(id: string, src: string): Omit<Mod, "enabled"> {
   else if (injectInto === "content") world = "isolated";
   else if (sandbox === "raw" || sandbox === "javascript") world = "main";
   else if (sandbox === "dom") world = "isolated";
+  const needsExtension = [...grants].filter((g) => !LOCAL_FUNCTIONS.has(g));
+  if (world === "main" && needsExtension.length) {
+    warnings.push(`GM_${needsExtension.join(", GM_")} can't work in the page's world (@inject-into page)`);
+  }
 
   const runAtRaw = first(meta, "run-at")?.trim().toLowerCase();
   const runAt: RunAt =
@@ -290,6 +301,7 @@ export function parseUserScript(id: string, src: string): Omit<Mod, "enabled"> {
     allFrames: !meta.entries.some(([k]) => k === "noframes"),
     js: src,
     grants: [...grants],
+    connects: all(meta, "connect").map((v) => v.trim().toLowerCase()).filter(Boolean),
     requireUrls,
     resourceUrls,
     info: {

@@ -74,14 +74,10 @@ the side panel, or not at all:
   stop once the agent or the user has edited the file.
 - **`unsafeWindow`** in isolated scripts is the isolated `window`, not the
   page's. Scripts that grant GM functions and also read page globals need
-  `@inject-into page`.
-- **The rest of the GM API:** storage (`GM_getValue` and friends, available
-  before `@run-at document-start` scripts run), `GM_xmlhttpRequest` (checking
-  `@connect` on every redirect, no ambient cookies by default),
-  `GM_registerMenuCommand` (in the side panel's menu), `GM_openInTab` (http(s)
-  only), `GM_notification`. Branch `claude/eyepatch-mod-architecture-j4xmra`
-  has a first version (`extension/gm.js`); each mod's own world (`worldIdOf`)
-  keeps its messaging token from other mods.
+  `@inject-into page`, where those GM functions don't work.
+- **More of the GM API:** `GM_download`, `GM_cookie`, `GM_getTab`/`GM_saveTab`,
+  `GM_webRequest`; forbidden request headers in `GM_xmlhttpRequest` (needs
+  `declarativeNetRequest`); `GM_notification` click callbacks.
 - **UserCSS:** `@var` values are fixed at their defaults. Settings could let
   you change them. Preprocessors (Stylus, Less) aren't supported.
 
