@@ -98,7 +98,11 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
   Menus can be nearly as tall as the panel.
 - **Agent switcher:** agents with logo tiles (`.tile.sm`) and a check on the
   current one; last item "Add more agents" opens Settings.
-- **Model picker:** a menu; add a filter field when there are more than ~10.
+- **Model and effort:** one button ("Sonnet 5.5 High", effort in faint text)
+  and one menu: the models (a filter field when there are more than ~10),
+  then a hairline and an "Effort · High ›" row that swaps the menu to the
+  effort levels in place, with a back row. No side submenus: the panel is too
+  narrow.
 - **All chats:** replaces the panel with a back arrow, "All chats" and a
   search field, grouped by site (current site first).
 - **No agent:** the mark, "Install an agent to start", and an "Open Settings"
