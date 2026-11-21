@@ -1,5 +1,6 @@
 import { modApplies } from "./match.js";
 import { toolTitle } from "./tool-names.js";
+import { cssCode, removeCssCode, reportCode, scriptsFor, worldIdOf } from "./userscripts.js";
 
 // Eyepatch service worker: owns the WebSocket to Agent Bridge (the local
 // program that runs the agents), runs browser tools for them, registers mods
@@ -56,11 +57,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // Chrome clears a tab's badge when it navigates; put it back.
 // Console capture is per page load, too: start it again on each new page.
-chrome.tabs.onUpdated.addListener((tabId, info) => {
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "complete") return checkModsRan(tabId);
   if (info.status !== "loading") return;
   if (attention.has(tabId) || modsRan.has(tabId)) updateBadge(tabId);
-  if (hasChat(tabId)) startCapture(tabId);
+  if (hasChat(tabId)) startCapture(tabId, tab.url);
 });
 
 /** Tabs with a chat (panel open, or a session from earlier). Only these are watched. */
@@ -168,6 +169,9 @@ async function onBridgeMessage(msg) {
     case "history":
       for (const p of panels.get(msg.tabId) ?? []) p.postMessage({ type: "history", items: msg.items });
       return;
+    case "options_event":
+      for (const p of optionsPages) p.postMessage(msg.event);
+      return;
     case "reload_extension":
       return chrome.runtime.reload();
   }
@@ -243,7 +247,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
   port.onMessage.addListener((msg) => {
     if (msg.type === "color_scheme") return setToolbarIcon(msg.dark);
-    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete", "mod_reveal"].includes(msg.type)) send(msg);
+    if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete", "mod_reveal", "mod_export", "mod_import"].includes(msg.type)) send(msg);
   });
 });
 
@@ -678,11 +682,11 @@ const tools = {
     const read = `(() => { const b = globalThis.__smConsole; return b ? b.slice() : null; })()`;
     const entries = [];
     let installed = false;
-    for (const world of ["USER_SCRIPT", "MAIN"]) {
-      const [res] = await chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: read }], world });
+    for (const world of captureWorlds(tab.url)) {
+      const [res] = await chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: read }], ...world });
       if (Array.isArray(res?.result)) entries.push(...res.result);
       else {
-        await chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: captureCode(world) }], world, injectImmediately: true });
+        await chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: captureCode(world) }], ...world, injectImmediately: true });
         installed = true;
       }
     }
@@ -762,31 +766,24 @@ function loadAndWait(tabId, start, timeoutMs = 15000) {
 
 // ---------- mods -> user scripts ----------
 
-const styleId = (modId) => `eyepatch-${modId}`;
-
-function cssCode(modId, css) {
-  return `(() => {
-  const id = ${JSON.stringify(styleId(modId))};
-  let s = document.getElementById(id);
-  if (!s) {
-    s = document.createElement("style");
-    s.id = id;
-    (document.head || document.documentElement).appendChild(s);
-  }
-  s.textContent = ${JSON.stringify(css)};
-})();`;
-}
-
-function removeCssCode(modId) {
-  return `document.getElementById(${JSON.stringify(styleId(modId))})?.remove();`;
-}
-
 /**
- * Console capture for one JS world. Each world (the page's MAIN world and the
- * USER_SCRIPT world mods run in) has its own globals and console, so this is
- * injected into both. Read back by get_console_logs.
+ * The JS worlds to capture console output from in a page: the page's own, the
+ * one run_js uses, and each userscript's (see worldIdOf). Each has its own
+ * globals and console.
  */
-function captureCode(world) {
+function captureWorlds(url) {
+  const worlds = [{ world: "MAIN" }, { world: "USER_SCRIPT" }];
+  for (const mod of lastMods.values()) {
+    if (mod.kind === "js" && mod.world !== "main" && mod.enabled && !mod.error && url && modApplies(mod, url)) {
+      worlds.push({ world: "USER_SCRIPT", worldId: worldIdOf(mod.id) });
+    }
+  }
+  return worlds;
+}
+
+/** Console capture for one JS world (from captureWorlds). Read back by get_console_logs. */
+function captureCode({ world, worldId }) {
+  const source = world === "MAIN" ? { world: "page" } : { world: "mods", ...(worldId && { mod: worldId.slice("mod:".length) }) };
   return `(() => {
   if (globalThis.__smConsole) return;
   const buf = (globalThis.__smConsole = []);
@@ -798,7 +795,7 @@ function captureCode(world) {
     return String(a);
   };
   const push = (level, args) => {
-    buf.push({ t: Date.now(), world: ${JSON.stringify(world === "MAIN" ? "page" : "mods")}, level, text: args.map(fmt).join(" ").slice(0, 2000) });
+    buf.push({ t: Date.now(), ...${JSON.stringify(source)}, level, text: args.map(fmt).join(" ").slice(0, 2000) });
     if (buf.length > 300) buf.shift();
   };
   for (const level of ["error", "warn", "log", "info"]) {
@@ -813,55 +810,24 @@ function captureCode(world) {
 })();`;
 }
 
-/** Records a mod's top-level exception (with the mod id) before rethrowing. */
-function wrapModJs(mod) {
-  return `try {
-${mod.js}
-} catch (e) {
-  (globalThis.__smConsole ||= []).push({ t: Date.now(), world: "mods", level: "uncaught", text: ${JSON.stringify(`[mod ${mod.id}] `)} + (e?.stack || e) });
-  throw e;
-}`;
-}
-
-/** Tells the extension the mod ran in this page, for the toolbar badge. */
-function reportCode(modId) {
-  return `(() => {
-  const report = () => chrome.runtime.sendMessage({ type: "mod_ran", id: ${JSON.stringify(modId)} }).catch(() => {});
-  report();
-  addEventListener("pageshow", (e) => e.persisted && report()); // back/forward cache
-})();`;
-}
-
-function scriptsFor(mod) {
-  if (mod.error || !mod.enabled) return [];
-  const common = { matches: mod.matches, excludeMatches: mod.excludeMatches ?? [] };
-  const out = [{ ...common, id: `mod:${mod.id}:ran`, js: [{ code: reportCode(mod.id) }], runAt: "document_start", world: "USER_SCRIPT" }];
-  if (mod.css) {
-    out.push({ ...common, id: `mod:${mod.id}:css`, js: [{ code: cssCode(mod.id, mod.css) }], runAt: "document_start", world: "USER_SCRIPT" });
-  }
-  if (mod.js) {
-    out.push({ ...common, id: `mod:${mod.id}:js`, js: [{ code: wrapModJs(mod) }], runAt: mod.runAt, world: mod.world === "main" ? "MAIN" : "USER_SCRIPT" });
-  }
-  return out;
-}
-
 /**
- * Capture console output in a chat's tab (both worlds). Only chat tabs: the
+ * Capture console output in a chat's tab (every world). Only chat tabs: the
  * wrapper puts our code on the stack of every console.error, so Chrome files
  * the page's own errors under Eyepatch.
  */
-function startCapture(tabId) {
+async function startCapture(tabId, url) {
   if (!userScriptsAvailable()) return;
-  for (const world of ["USER_SCRIPT", "MAIN"]) {
+  url ??= (await chrome.tabs.get(tabId).catch(() => null))?.url;
+  for (const world of captureWorlds(url)) {
     chrome.userScripts
-      .execute({ target: { tabId }, js: [{ code: captureCode(world) }], world, injectImmediately: true })
+      .execute({ target: { tabId }, js: [{ code: captureCode(world) }], ...world, injectImmediately: true })
       .catch(() => {}); // e.g. chrome:// pages
   }
 }
 
 async function tabsMatching(mod) {
   try {
-    return await chrome.tabs.query({ url: mod.matches });
+    return (await chrome.tabs.query({ url: mod.matches })).filter((t) => t.url && modApplies(mod, t.url));
   } catch {
     return [];
   }
@@ -873,7 +839,7 @@ async function tabsMatching(mod) {
  * them), or every matching tab when that's null.
  */
 async function syncMods(mods, changed, reloadTabs = null) {
-  modList = mods.map(({ js, css, ...m }) => m);
+  modList = mods.map(({ js, sections, requires, resources, info, ...m }) => m);
   if (!userScriptsAvailable()) {
     broadcastState();
     return;
@@ -891,7 +857,7 @@ async function syncMods(mods, changed, reloadTabs = null) {
       continue;
     }
     // Register per mod so one bad match pattern doesn't block the rest.
-    const scripts = scriptsFor(mod);
+    const scripts = scriptsFor(mod, chrome.runtime.getManifest().version);
     if (!scripts.length) continue;
     try {
       await chrome.userScripts.register(scripts);
@@ -900,22 +866,25 @@ async function syncMods(mods, changed, reloadTabs = null) {
     }
   }
 
-  // Apply changes to open tabs: CSS hot-swaps, anything else reloads.
+  // Apply changes to open tabs: styles hot-swap, scripts reload.
   const next = new Map(mods.map((m) => [m.id, m]));
+  const live = (m) => m && !m.error && m.enabled;
   const toReload = new Set();
   const hotSwaps = [];
   for (const id of changed) {
     const before = lastMods.get(id);
     const after = next.get(id);
-    const live = (m) => m && !m.error && m.enabled;
-    const cssOnly =
-      live(before) && live(after) &&
-      before.js === after.js && before.world === after.world && before.runAt === after.runAt &&
-      JSON.stringify(before.matches) === JSON.stringify(after.matches);
-    if (cssOnly) {
-      for (const tab of await tabsMatching(after)) {
-        const code = after.css ? cssCode(id, after.css) : removeCssCode(id);
-        hotSwaps.push(chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code }] }).catch(() => {}));
+    const isStyle = (m) => !m || m.kind === "css";
+    if (isStyle(before) && isStyle(after)) {
+      // Update the styles wherever the mod applied or now applies; turning
+      // one on or off needs no reload either.
+      const tabs = new Map();
+      for (const m of [before, after]) if (live(m)) for (const t of await tabsMatching(m)) tabs.set(t.id, t);
+      if (live(before) && !live(after)) for (const t of tabs.values()) forgetModRan(t.id, id);
+      const code = live(after) ? cssCode(after) : removeCssCode(id);
+      for (const t of tabs.values()) {
+        hotSwaps.push(chrome.userScripts.execute({ target: { tabId: t.id, allFrames: true }, js: [{ code }] }).catch(() => {}));
+        if (live(after) && !live(before)) hotSwaps.push(chrome.userScripts.execute({ target: { tabId: t.id }, js: [{ code: reportCode(after) }] }).catch(() => {}));
       }
     } else {
       for (const m of [before, after]) {
@@ -931,8 +900,8 @@ async function syncMods(mods, changed, reloadTabs = null) {
 
   // Resolve only once changes are visible, so the agent's next tool call
   // (which Agent Bridge holds until this returns) sees the new page.
-  await Promise.all([...hotSwaps, ...[...toReload].map((tabId) => reloadAndWait(tabId))]);
   lastMods = next;
+  await Promise.all([...hotSwaps, ...[...toReload].map((tabId) => reloadAndWait(tabId))]);
   broadcastState();
   for (const [id, error] of Object.entries(modErrors)) {
     if (!changed.includes(id)) continue;
@@ -1119,6 +1088,13 @@ function forgetModsRan(tabId) {
   if (modsRan.delete(tabId)) saveModsRan();
 }
 
+/** A mod stopped running in a tab without a reload (a style turned off). */
+function forgetModRan(tabId, modId) {
+  if (!modsRan.get(tabId)?.ids.delete(modId)) return;
+  saveModsRan();
+  updateBadge(tabId);
+}
+
 chrome.runtime.onUserScriptMessage?.addListener((msg, sender) => {
   const tabId = sender.tab?.id;
   if (msg?.type !== "mod_ran" || typeof msg.id !== "string" || tabId == null || sender.frameId !== 0) return;
@@ -1157,7 +1133,30 @@ async function countModsInOpenTabs(mods) {
     if (mod.error || !mod.enabled) continue;
     for (const tab of await tabsMatching(mod)) {
       if (!tab.url || !modApplies(mod, tab.url) || modsRan.get(tab.id)?.ids.has(mod.id)) continue;
-      chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: reportCode(mod.id) }] }).catch(() => {});
+      chrome.userScripts.execute({ target: { tabId: tab.id }, js: [{ code: reportCode(mod) }] }).catch(() => {});
     }
   }
 }
+
+// ---------- installing userscripts from the web ----------
+// Chrome downloads .user.js / .user.css URLs instead of showing them, so
+// opening one (e.g. Greasy Fork's Install button) is redirected to Settings,
+// which offers to install it, as userscript managers do. Settings is only
+// reachable this way through its dynamic URL (web_accessible_resources).
+
+const INSTALL_RULE_ID = 1;
+
+async function interceptInstalls() {
+  const install = chrome.runtime.getURL("options.html?install=");
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [INSTALL_RULE_ID],
+    addRules: [
+      {
+        id: INSTALL_RULE_ID,
+        condition: { regexFilter: "^https?://[^?#]*\\.user\\.(js|css)(\\?.*)?$", resourceTypes: ["main_frame"] },
+        action: { type: "redirect", redirect: { regexSubstitution: `${install}\\0` } },
+      },
+    ],
+  });
+}
+interceptInstalls().catch((e) => console.warn("[eyepatch] install links:", e));

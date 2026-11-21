@@ -135,8 +135,12 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
   `.progress` bar; failures show the reason and "Try again".
 - **Mods:** grouped by site (`.group-title`, 16 px, globe icon) with
   `.group-items` indented under the name. Each mod: name, one-line
-  description, `.switch.lg`, and a trash icon button. Broken mods are listed
-  first under a red "Not running" group with their error.
+  description, `.switch.lg`, then icon buttons for export (`download`), show
+  in folder (`folder-open`) and delete (`trash-2`). Broken mods are listed
+  first under a red "Not running" group with their error. An "Import a mod"
+  `.add-row` ends the section.
+- **Install dialog** (opening a `.user.js`/`.user.css` URL): a `.dialog` with
+  the mod's name, description, a `dl` of Version / Runs on / Uses / From, then a quiet "Cancel" and a primary "Install".
 - **Confirmations are inline:** the row becomes a `.confirm` band with the
   consequence, a quiet "Cancel" and a `.btn.danger`.
 

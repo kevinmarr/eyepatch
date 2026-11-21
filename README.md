@@ -115,15 +115,58 @@ Notifications → Google Chrome).
 
 ## Mods
 
-Each mod is a folder in `~/.eyepatch/mods/<id>/` with `mod.json`, and
-optionally `mod.css` and `mod.js`. The agent's working directory is
-`~/.eyepatch/mods`, and `CLAUDE.md`/`AGENTS.md` there describe the format.
-The Options page lists every mod by site, with an on/off switch and a delete
-button (deleted mods move to `~/.eyepatch/trash/`). Files apply live: CSS
-hot-swaps in every open tab. A JS change reloads the tab
+Each mod is one file in `~/.eyepatch/mods/`, in a format that userscript
+managers already use, so mods move between Eyepatch and those managers
+unchanged:
+
+- `<id>.user.css` is a [UserCSS](https://github.com/openstyles/stylus/wiki/Writing-UserCSS)
+  style, as Stylus uses: a `/* ==UserStyle== */` header, then CSS in
+  `@-moz-document` blocks that say where it applies.
+- `<id>.user.js` is a userscript, as Tampermonkey, Violentmonkey and
+  Greasemonkey use: a `// ==UserScript==` header (`@match`, `@grant`, …),
+  then the script.
+
+The agent's working directory is `~/.eyepatch/mods`, and `CLAUDE.md`/`AGENTS.md`
+there describe the formats. Whether each mod is on is kept in
+`~/.eyepatch/mods-state.json`, not in the file. Mods from before this format
+(folders with `mod.json`) are converted when Agent Bridge starts. The old
+folders go to `~/.eyepatch/trash/`.
+
+The Options page lists every mod by site, with an on/off switch, export,
+show-in-folder and delete (deleted mods move to `~/.eyepatch/trash/`), and
+**Import a mod** for `.user.js` and `.user.css` files. Opening a `.user.js` or
+`.user.css` URL, for example Greasy Fork's Install button, opens Settings and
+offers to install it. You can also drop files into the folder.
+
+Files apply live. Styles hot-swap in every open tab, including when they're
+turned on or off. A script change reloads the tab
 whose agent made it, not other tabs on the same site (they pick it up when they
 next load). Edits you make by hand, or with Claude Code in a terminal, reload
 every matching tab.
+
+### Userscript support
+
+Scripts run the way userscript managers run them: inside a function, after
+their `@require` files (downloaded once into `~/.eyepatch/cache/`, checked
+against any `#sha256=…`). Supported:
+
+- **Where:** `@match`, `@exclude-match`, `@include` and `@exclude` (globs, `.tld`
+  and `/regexes/`), `@run-at`, `@noframes`.
+- **World:** as in Tampermonkey, a script that grants nothing runs in the page's
+  own JS world, and one with grants runs in an isolated world that sees only the
+  DOM. Each script gets its own isolated world, so scripts can't see each
+  other's globals. `@inject-into page|content` (Violentmonkey) and `@sandbox`
+  (Tampermonkey) choose explicitly.
+- **GM API** (`GM_*` and `GM.*`): `addStyle`, `addElement`, `setClipboard`,
+  `getResourceText`, `getResourceURL`, `info` and `log`.
+- **Not supported yet:** other `GM_` functions (storage, `xmlhttpRequest`,
+  menu commands, `openInTab`, `notification`, …) throw an error saying so, and
+  Settings shows the grant as unsupported. `unsafeWindow` is the isolated
+  world's `window`; use `@grant none` or `@inject-into page` for page globals.
+  `@updateURL` updates aren't checked.
+
+UserCSS styles must be plain CSS: `@var` defaults become CSS custom properties,
+and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
 
 ## Dev loop
 
@@ -142,6 +185,11 @@ every matching tab.
 - **Without Chrome:** `npm run fake-extension -- "make the h1 red"` drives the
   Agent Bridge with canned page data. Add `FAKE_AGENT=claude-acp` (any registry
   id) to pick and install that agent first.
+- **Tests:** `npm test` checks match patterns and mod parsing. `npm run
+  test:e2e` loads the extension in Playwright's Chromium with a real Agent
+  Bridge and checks that mods run: styles, hot swap, userscripts and their GM
+  functions, install from a URL, import and export. It needs Playwright installed, and port 7457
+  free.
 
 ## Config (env vars)
 
