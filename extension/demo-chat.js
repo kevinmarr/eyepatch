@@ -12,6 +12,16 @@ const state = {
   bridge: { connected: true, agentId: "claude-acp", agent: "Claude Agent", ready: true, images: true, busy: false, needsAgent: false },
   auth: null,
   model: { current: "sonnet-5-5", options: MODELS },
+  mode: {
+    current: "acceptEdits",
+    options: [
+      ["default", "Manual", "Always ask before making changes"],
+      ["acceptEdits", "Accept edits", "Automatically accept all file edits"],
+      ["plan", "Plan", "Create a plan before making changes"],
+      ["auto", "Auto", "Claude handles permission decisions"],
+      ["bypassPermissions", "Bypass permissions", "Accepts all permissions"],
+    ].map(([value, name, description]) => ({ value, name, description })),
+  },
   effort: { current: "high", options: ["Default", "Low", "Medium", "High", "Xhigh", "Max"].map((name) => ({ value: name.toLowerCase(), name })) },
   agents: {
     selected: "claude-acp",
@@ -172,6 +182,9 @@ export function connect() {
           return emit({ type: "history", items: HISTORY });
         case "set_model":
           state.model.current = msg.value;
+          return emit({ type: "state", state });
+        case "set_mode":
+          state.mode.current = msg.value;
           return emit({ type: "state", state });
         case "set_effort":
           state.effort.current = msg.value;

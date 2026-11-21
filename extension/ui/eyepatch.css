@@ -282,9 +282,13 @@ svg.icon { flex: none; display: block; }
 .icon-btn[aria-pressed="true"] { background: var(--text); color: var(--bg); }
 .message-elements { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .message-elements .pill { font-family: var(--mono); font-size: var(--fs-code); font-weight: 400; }
-/* The page pill keeps just its icon when the bar is tight. */
+/* When the bar is tight, the page pill gives way first, then the mode's name. */
 .composer-bar { container-type: inline-size; }
-@container (max-width: 360px) { #page > span { display: none; } #page { padding: 0 8px; } }
+@container (max-width: 440px) { #page > span { display: none; } #page { padding: 0 8px; } }
+@container (max-width: 390px) { #page { display: none; } }
+.composer-bar .model-btn { flex: 0 1 auto; min-width: 0; }
+.composer-bar .model-btn > span { overflow: hidden; text-overflow: ellipsis; }
+.composer-bar .menu-anchor { min-width: 0; }
 .composer.dropping { box-shadow: var(--shadow-box), 0 0 0 2px var(--text); }
 .composer-bar .spacer { flex: 1; }
 .model-btn {

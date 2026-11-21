@@ -103,6 +103,12 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
   then a hairline and an "Effort · High ›" row that swaps the menu to the
   effort levels in place, with a back row. No side submenus: the panel is too
   narrow.
+- **Mode:** its own button left of the model, always with the `settings-2`
+  icon so a mode called "Auto" doesn't read as a model. Its menu has a "Mode"
+  label and each mode's own name and description. Use the agent's mode names
+  as they are.
+- **Tight message box:** things give way in this order: the page pill's text,
+  the page pill, the effort label, then the mode's name (icon only).
 - **All chats:** replaces the panel with a back arrow, "All chats" and a
   search field, grouped by site (current site first).
 - **No agent:** the mark, "Install an agent to start", and an "Open Settings"

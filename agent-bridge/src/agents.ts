@@ -216,10 +216,13 @@ function checkCanChat(spec: LaunchSpec): Promise<string | null> {
   });
 }
 
+/** The agent settings a chat can pick, remembered per agent. */
+export type SelectKind = "model" | "effort" | "mode";
+
 export class AgentManager {
   private registry: RegistryAgent[] = [];
   private registryError: string | null = null;
-  private settings: { agent?: string; models?: Record<string, string>; efforts?: Record<string, string> } = {};
+  private settings: { agent?: string; models?: Record<string, string>; efforts?: Record<string, string>; modes?: Record<string, string> } = {};
   private installed = new Map<string, InstallInfo>(); // id -> newest installed copy
   private installing: InstallProgress | null = null;
   private installError: { id: string; message: string } | null = null;
@@ -292,13 +295,13 @@ export class AgentManager {
     return this.registry.find((a) => a.id === id)?.name ?? id;
   }
 
-  /** The model or effort level last picked for an agent. */
-  preferred(kind: "model" | "effort", id: string): string | undefined {
-    return this.settings[kind === "model" ? "models" : "efforts"]?.[id];
+  /** The model, effort level or mode last picked for an agent. */
+  preferred(kind: SelectKind, id: string): string | undefined {
+    return this.settings[`${kind}s`]?.[id];
   }
 
-  async setPreferred(kind: "model" | "effort", id: string, value: string) {
-    const key = kind === "model" ? "models" : "efforts";
+  async setPreferred(kind: SelectKind, id: string, value: string) {
+    const key = `${kind}s` as const;
     this.settings[key] = { ...this.settings[key], [id]: value };
     await this.saveSettings();
   }

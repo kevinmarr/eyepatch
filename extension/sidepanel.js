@@ -24,7 +24,7 @@ let state = null;
 let port = null;
 let history = null; // past chats, newest first; fetched when the menu opens
 let hasMessages = false;
-let openMenu = null; // "agent" | "more" | "model"
+let openMenu = null; // "agent" | "more" | "model" | "mode"
 let attachments = []; // images for the next message: { mimeType, data, thumb }
 let picked = []; // elements picked on the page for the next message: { selector, label, html, text }
 let picking = false;
@@ -111,6 +111,7 @@ function setState(s) {
 
   renderAlerts();
   renderModel();
+  renderMode();
   renderAgentMenu();
   renderMoreMenu();
   renderEmpty();
@@ -317,8 +318,9 @@ function setMenu(name) {
   renderAgentMenu();
   renderMoreMenu();
   renderModelMenu();
+  renderModeMenu();
 }
-for (const [btn, name] of [["agent", "agent"], ["more", "more"], ["model", "model"]]) {
+for (const [btn, name] of [["agent", "agent"], ["more", "more"], ["model", "model"], ["mode", "mode"]]) {
   $(btn).addEventListener("click", (e) => {
     e.stopPropagation();
     setMenu(openMenu === name ? null : name);
@@ -548,6 +550,48 @@ new MutationObserver(() => {
   delete $("model-menu").dataset.view;
   modelView = "models";
 }).observe($("model-menu"), { attributes: true, attributeFilter: ["hidden"] });
+
+// ---------- mode ----------
+// How much the agent asks before acting (Claude: Manual, Accept edits, Plan,
+// Auto…; Cursor: Agent, Plan, Ask). Its own button, with an icon so a mode
+// named "Auto" doesn't read as a model.
+
+function renderMode() {
+  const el = $("mode");
+  const mode = state?.mode;
+  el.hidden = !mode?.options.length;
+  if (el.hidden) return;
+  const current = currentOf(mode);
+  el.innerHTML = `${icon("settings-2", { size: 14 })}<span>${esc(current?.name ?? "Mode")}</span>`;
+  el.title = current ? `Mode: ${current.name}` : "Mode";
+  el.setAttribute("aria-label", el.title);
+  renderModeMenu();
+}
+
+function renderModeMenu() {
+  const el = $("mode-menu");
+  const mode = state?.mode;
+  const open = openMenu === "mode" && Boolean(mode?.options.length);
+  el.hidden = !open;
+  $("mode").setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  el.innerHTML =
+    `<p class="menu-label">Mode</p>` +
+    mode.options
+      .map(
+        (o) =>
+          `<button type="button" class="menu-item" role="menuitemradio" aria-checked="${o.value === mode.current}" data-value="${esc(o.value)}">` +
+          `<span class="grow"><span>${esc(o.name)}</span>${o.description ? `<span class="desc">${esc(o.description)}</span>` : ""}</span>` +
+          `${o.value === mode.current ? icon("check", { cls: "check" }) : ""}</button>`,
+      )
+      .join("");
+}
+$("mode-menu").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-value]");
+  if (!t) return;
+  port.postMessage({ type: "set_mode", value: t.dataset.value });
+  setMenu(null);
+});
 
 // ---------- empty chat ----------
 
@@ -1039,9 +1083,11 @@ function renderPermission(e) {
   requests.set(e.id, sec);
   const title = e.toolCall?.title ? toolTitle(e.toolCall) : "The agent wants to run a tool";
   const code = requestCode(e.toolCall);
+  // Leaving plan mode: the request carries the plan to approve.
+  const plan = typeof e.toolCall?.rawInput?.plan === "string" ? e.toolCall.rawInput.plan : null;
   sec.innerHTML =
     `<h2 class="request-title">${icon(toolIcon(e.toolCall ?? {}), { size: 17 })}<span>${inline(title)}</span></h2>` +
-    (code ? codeBlock(code.code, code.lang) : "") +
+    (plan ? `<div class="md plan-text">${markdown(plan)}</div>` : code ? codeBlock(code.code, code.lang) : "") +
     `<div class="answers"></div>`;
   sec._title = title;
   sec._kind = toolIcon(e.toolCall ?? {});

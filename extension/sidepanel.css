@@ -10,6 +10,17 @@ body { overflow: hidden; }
 .more-menu { top: 38px; right: 0; width: min(318px, calc(100vw - 20px)); }
 .model-menu { bottom: 38px; right: -40px; top: auto; width: min(280px, calc(100vw - 24px)); gap: 2px; }
 .model-menu .search { margin-bottom: 4px; flex: none; }
+.mode-menu { bottom: 38px; top: auto; right: -120px; width: min(300px, calc(100vw - 24px)); gap: 2px; }
+.mode-menu .menu-item { align-items: flex-start; padding: 8px 10px; }
+.mode-menu .menu-item .grow { display: flex; flex-direction: column; gap: 1px; white-space: normal; }
+.mode-menu .menu-item .desc { font-size: var(--fs-meta); color: var(--text-faint); line-height: 1.4; }
+.mode-menu .menu-item .check { margin-top: 2px; }
+.composer-bar .mode-btn { flex: none; }
+.mode-btn .icon { color: var(--text-faint); }
+.request .plan-text { max-height: 320px; overflow-y: auto; }
+/* After the page pill (eyepatch.css), the effort label gives way, then the mode's name. */
+@container (max-width: 390px) { .model-btn .effort-label { display: none; } }
+@container (max-width: 320px) { .mode-btn > span { display: none; } }
 .model-btn .effort-label { color: var(--text-faint); font-weight: 400; }
 .model-menu .model-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
 .model-menu .menu-group:first-child { min-height: 0; }

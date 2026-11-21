@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import { AgentProcess } from "./agent-process.js";
-import type { AgentManager } from "./agents.js";
+import type { AgentManager, SelectKind } from "./agents.js";
 import { AUTH_REQUIRED } from "./auth.js";
 import type { ToolSocket } from "./tool-socket.js";
 import { HOME, MODS_DIR } from "./config.js";
@@ -47,6 +47,8 @@ type Chat = {
   sessionStarting?: Promise<string>;
   busy: boolean;
   configOptions: acp.SessionConfigOption[];
+  /** The agent's modes, for agents that report them only the older way (not as a config option). */
+  modes?: acp.SessionModeState | null;
   /** This conversation's route to the browser tools. */
   browserTools?: { dispose: () => void };
   /** Guarded tools the user just approved (tool -> when), or always allows in this chat. */
@@ -216,6 +218,9 @@ export class Chats {
         break;
       case "set_effort":
         void this.setOption(msg.tabId, "effort", msg.value);
+        break;
+      case "set_mode":
+        void this.setOption(msg.tabId, "mode", msg.value);
         break;
       case "agent_select":
         void this.setAgent(msg.tabId, msg.id);
@@ -390,6 +395,7 @@ export class Chats {
     chat.sessionId = undefined;
     chat.sessionStarting = undefined;
     chat.configOptions = [];
+    chat.modes = undefined;
     chat.events = [];
     chat.edits.clear();
     chat.approvals.clear();
@@ -417,6 +423,7 @@ export class Chats {
         sessionId: chat.sessionId ?? null,
         model: this.optionView(chat, "model"),
         effort: this.optionView(chat, "effort"),
+        mode: this.optionView(chat, "mode"),
       },
     });
   }
@@ -463,6 +470,7 @@ export class Chats {
             c.sessionStarting = undefined;
             c.busy = false;
             c.configOptions = [];
+            c.modes = undefined;
             this.sendChat(c);
           }
         },
@@ -540,30 +548,22 @@ export class Chats {
     chat.sessionId = res.sessionId;
     chat.browserTools = tools;
     chat.configOptions = res.configOptions ?? [];
+    chat.modes = res.modes;
     agent.addSession(res.sessionId, {
       onUpdate: (update) => this.onUpdate(chat, update),
       onPermission: (params, signal) => this.requestPermission(chat, params, signal),
     });
 
-    // Mods live in their own directory and apply live, so don't prompt for
-    // every file edit. Commands and other tools still ask in the side panel.
-    const acceptEdits = res.modes?.availableModes.find((m) => m.id === "acceptEdits");
-    if (acceptEdits) {
-      await conn.agent.request(acp.methods.agent.session.setMode, { sessionId: res.sessionId, modeId: acceptEdits.id });
-    }
-    // Use the model and effort last picked for this agent (model first: the
-    // effort levels on offer can depend on it).
-    for (const kind of ["model", "effort"] as const) {
-      const preferred = this.catalog.preferred(kind, agentId);
-      const opt = this.selectOption(chat, kind);
-      if (!opt || !preferred || preferred === opt.currentValue || !this.flatOptions(opt).some((o) => o.value === preferred)) continue;
+    // Use the model, effort and mode last picked for this agent (model first:
+    // the effort levels on offer can depend on it). Until a mode is picked,
+    // accept edits: mods live in their own directory and apply live, so don't
+    // prompt for every file edit. Commands and other tools still ask.
+    for (const kind of ["model", "effort", "mode"] as const) {
+      const view = this.optionView(chat, kind);
+      const preferred = this.catalog.preferred(kind, agentId) ?? (kind === "mode" ? "acceptEdits" : undefined);
+      if (!view || !preferred || preferred === view.current || !view.options.some((o) => o.value === preferred)) continue;
       try {
-        const set = await conn.agent.request(acp.methods.agent.session.setConfigOption, {
-          sessionId: res.sessionId,
-          configId: opt.id,
-          value: preferred,
-        });
-        chat.configOptions = set.configOptions;
+        await this.applyOption(chat, conn, res.sessionId, kind, preferred);
       } catch (e) {
         console.warn(`[${agentId}] couldn't restore the ${kind}:`, (e as Error).message);
       }
@@ -612,6 +612,12 @@ export class Chats {
   private onUpdate(chat: Chat, update: acp.SessionUpdate) {
     if (update.sessionUpdate === "config_option_update") {
       chat.configOptions = update.configOptions;
+      this.sendChat(chat);
+      return;
+    }
+    // The agent changed mode itself (e.g. leaving plan mode once its plan is approved).
+    if (update.sessionUpdate === "current_mode_update") {
+      if (chat.modes) chat.modes = { ...chat.modes, currentModeId: update.currentModeId };
       this.sendChat(chat);
       return;
     }
@@ -703,11 +709,11 @@ export class Chats {
     }
   }
 
-  // ---------- model and effort ----------
+  // ---------- model, effort and mode ----------
 
-  /** The agent's model picker, or its effort (reasoning) level, if it has one. */
-  private selectOption(chat: Chat, kind: "model" | "effort") {
-    const category = kind === "model" ? "model" : "thought_level";
+  /** The agent's model picker, effort (reasoning) level or mode, if it has one as a config option. */
+  private selectOption(chat: Chat, kind: SelectKind) {
+    const category = kind === "effort" ? "thought_level" : kind;
     const opt = chat.configOptions.find((o) => o.category === category && o.type === "select");
     return opt?.type === "select" ? opt : undefined;
   }
@@ -716,8 +722,14 @@ export class Chats {
     return opt.options.flatMap((o) => ("group" in o ? o.options : [o]));
   }
 
-  private optionView(chat: Chat, kind: "model" | "effort") {
+  private optionView(chat: Chat, kind: SelectKind) {
     const opt = this.selectOption(chat, kind);
+    if (!opt && kind === "mode" && chat.modes?.availableModes.length) {
+      return {
+        current: chat.modes.currentModeId,
+        options: chat.modes.availableModes.map((m) => ({ value: m.id, name: m.name, description: m.description ?? null })),
+      };
+    }
     if (!opt) return null;
     return {
       current: opt.currentValue,
@@ -725,19 +737,25 @@ export class Chats {
     };
   }
 
-  private async setOption(tabId: number, kind: "model" | "effort", value: string) {
+  /** Set a model, effort or mode: as a config option, or for older agents' modes with session/set_mode. */
+  private async applyOption(chat: Chat, conn: acp.ClientConnection, sessionId: string, kind: SelectKind, value: string) {
+    const opt = this.selectOption(chat, kind);
+    if (opt) {
+      const res = await conn.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: opt.id, value });
+      chat.configOptions = res.configOptions;
+    } else if (kind === "mode" && chat.modes) {
+      await conn.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: value });
+      chat.modes = { ...chat.modes, currentModeId: value };
+    }
+  }
+
+  private async setOption(tabId: number, kind: SelectKind, value: string) {
     const chat = this.chat(tabId);
     try {
       const sessionId = await this.ensureSession(chat);
-      const opt = this.selectOption(chat, kind);
       const agent = this.agentFor(chat);
-      if (!opt || !agent?.conn) return;
-      const res = await agent.conn.agent.request(acp.methods.agent.session.setConfigOption, {
-        sessionId,
-        configId: opt.id,
-        value,
-      });
-      chat.configOptions = res.configOptions;
+      if (!this.optionView(chat, kind) || !agent?.conn) return;
+      await this.applyOption(chat, agent.conn, sessionId, kind, value);
       await this.catalog.setPreferred(kind, agent.id, value);
     } catch (e) {
       this.error(chat, `Couldn't change the ${kind}: ${(e as Error).message}`);
