@@ -73,9 +73,3 @@ the side panel, or not at all:
 - Store listing, screenshots, privacy disclosures, and justifications for the
   `userScripts`, `<all_urls>` and (after section 1) `nativeMessaging`
   permissions.
-
-## 5. Features and fixes
-
-- **Claude Agent picks API key on its own:** setting up Claude Agent never
-  asks how to authenticate; it defaults to the API key, and switching to a
-  subscription takes Reauthenticate. Ask on first setup when there's a choice.
