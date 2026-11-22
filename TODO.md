@@ -55,7 +55,18 @@ the side panel, or not at all:
 - Browser tools with agents other than Claude Agent and Codex (only those two
   were tried), including whether screenshots reach the model.
 
-## 3. Mods
+## 3. Agents
+
+- **Use an agent you already installed** instead of a managed copy: Settings
+  could find ACP agents on your PATH (or take a command), for people who want
+  to control the version or not spend the disk space. Today only the
+  `EYEPATCH_AGENT` env var does this, for one agent and outside the UI. This
+  would also unlock the registry agents we hide (`NOT_OFFERED` in
+  `agent-bridge/src/agents.ts`): pi ACP, which expects `pi` on your PATH, and
+  Nova, Qoder and MiniMax Code, which don't run on Bun but would run on your
+  own Node.
+
+## 4. Mods
 
 - **Updates for imported mods:** scripts from Greasy Fork and similar have
   `@updateURL`/`@downloadURL`. Check them, offer the update in Settings, and
@@ -69,7 +80,7 @@ the side panel, or not at all:
 - **UserCSS:** `@var` values are fixed at their defaults. Settings could let
   you change them. Preprocessors (Stylus, Less) aren't supported.
 
-## 4. Chrome Web Store
+## 5. Chrome Web Store
 
 - Store icon and promo images from the Eyepatch mark.
 - Store listing, screenshots, privacy disclosures, and justifications for the
