@@ -22,7 +22,28 @@ let picking = null; // agent id whose authentication methods are showing
 let menuFor = null; // agent id whose ⋮ menu is open
 let confirming = null; // "agent:<id>" or "mod:<id>" awaiting confirmation
 // From the side panel's Authenticate button: options.html#signin=<agent id>
-let signinFromLink = new URLSearchParams(location.hash.slice(1)).get("signin");
+let signinFromLink = null;
+// From a mod named in a chat: options.html#mod=<mod id>
+let modFromLink = null;
+let currentMod = null; // the mod a link showed, highlighted until the next click or key
+let modLinkTimer;
+
+function readHash() {
+  const hash = new URLSearchParams(location.hash.slice(1));
+  signinFromLink = hash.get("signin") ?? signinFromLink;
+  if (!hash.has("mod")) return;
+  modFromLink = hash.get("mod");
+  history.replaceState(null, "", location.pathname + location.search);
+  // A mod that never shows up (deleted, or not picked up yet) is forgotten.
+  clearTimeout(modLinkTimer);
+  modLinkTimer = setTimeout(() => (modFromLink = null), 5000);
+}
+readHash();
+// The side panel reuses an open Settings tab by changing its hash.
+addEventListener("hashchange", () => {
+  readHash();
+  if (state) rerender();
+});
 
 function connectPort() {
   port = DEMO ? demo.connect() : chrome.runtime.connect({ name: "options" });
@@ -379,8 +400,14 @@ let modsKey = "";
 function renderMods(s) {
   const mods = s.mods ?? [];
   $("mods-section").hidden = !s.connected && !mods.length;
-  const key = JSON.stringify([mods, confirming]);
-  if (key === modsKey) return;
+  const arrived = Boolean(modFromLink && mods.some((m) => m.id === modFromLink));
+  if (arrived) {
+    currentMod = modFromLink;
+    modFromLink = null;
+    clearTimeout(modLinkTimer);
+  }
+  const key = JSON.stringify([mods, confirming, currentMod]);
+  if (key === modsKey) return arrived && showCurrentMod();
   modsKey = key;
   const NOT_RUNNING = "Not running";
   const bySite = new Map();
@@ -402,7 +429,7 @@ function renderMods(s) {
           confirming === `mod:${m.id}`
             ? `<div class="confirm" data-mod="${esc(m.id)}"><div class="main"><span class="name">Delete “${esc(m.name)}”?</span><span class="sub">It stops running on ${esc(siteOf(m))}.</span></div>` +
               `<div class="actions"><button type="button" class="btn quiet" data-do="confirm-cancel">Cancel</button><button type="button" class="btn danger" data-do="delete">Delete</button></div></div>`
-            : `<div class="row" data-mod="${esc(m.id)}"><div class="main"><span class="name">${esc(m.name)}</span>` +
+            : `<div class="row" data-mod="${esc(m.id)}"${m.id === currentMod ? ` aria-current="true" tabindex="-1"` : ""}><div class="main"><span class="name">${esc(m.name)}</span>` +
               `<span class="sub${m.error ? " danger" : ""}" title="${esc([m.error ?? m.description, ...(m.warnings ?? []), m.id].filter(Boolean).join("\n"))}">${esc(m.error ?? m.description ?? m.id)}</span></div>` +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
               `<button type="button" class="icon-btn lg" data-do="export" aria-label="Export ${esc(m.name)}" title="Export">${icon("download")}</button>` +
@@ -413,6 +440,28 @@ function renderMods(s) {
       return `<div class="mod-group">${title}<div class="group-items">${rows}</div></div>`;
     })
     .join("");
+  if (arrived) showCurrentMod();
+}
+
+/** Bring the linked mod into view and focus; it's let go on the next click or key. */
+function showCurrentMod() {
+  const row = $("mods").querySelector(".row[aria-current]");
+  if (!row) return;
+  row.scrollIntoView({ block: "center" });
+  row.focus({ preventScroll: true });
+  addEventListener("pointerdown", releaseCurrentMod, true);
+  addEventListener("keydown", releaseCurrentMod, true);
+}
+
+function releaseCurrentMod() {
+  removeEventListener("pointerdown", releaseCurrentMod, true);
+  removeEventListener("keydown", releaseCurrentMod, true);
+  currentMod = null;
+  for (const r of $("mods").querySelectorAll(".row[aria-current]")) {
+    r.removeAttribute("aria-current");
+    r.removeAttribute("tabindex");
+  }
+  modsKey = "";
 }
 
 $("mods").addEventListener("click", (e) => {

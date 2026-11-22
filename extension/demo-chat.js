@@ -34,8 +34,8 @@ const state = {
   userScripts: true,
   modErrors: {},
   mods: [
-    { id: "substack-readable-toc", name: "Substack: legible table of contents", description: "Moves the contents into the margin", enabled: true, matches: ["*://*.substack.com/*"] },
-    { id: "substack-hide-subscribe", name: "Hide in-article subscribe prompts", enabled: false, matches: ["*://*.substack.com/*"] },
+    { id: "substack-readable-toc.user.css", name: "Substack: legible table of contents", description: "Moves the contents into the margin", enabled: true, matches: ["*://*.substack.com/*"] },
+    { id: "substack-hide-subscribe.user.css", name: "Hide in-article subscribe prompts", enabled: false, matches: ["*://*.substack.com/*"] },
   ],
   sessionId: "demo",
 };

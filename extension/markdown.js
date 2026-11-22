@@ -11,10 +11,12 @@ export function esc(s) {
 }
 
 /** Inline Markdown in already-unescaped text. Code spans are protected first. */
-export function inline(src) {
+export function inline(src, { modLinks = false } = {}) {
   const codes = [];
   let s = String(src).replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, _t, code) => {
-    codes.push(`<code>${esc(code.trim() || code)}</code>`);
+    const html = `<code>${esc(code.trim() || code)}</code>`;
+    const mod = modLinks && modId(code.trim());
+    codes.push(mod ? `<a class="mod-link" data-mod="${esc(mod)}" data-text="${esc(code.trim())}">${html}</a>` : html);
     return `\u0000${codes.length - 1}\u0000`;
   });
   const links = [];
@@ -32,6 +34,19 @@ export function inline(src) {
   });
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[i]);
 }
+
+/**
+ * The mod a code span names, if it's a mod file: `foo.user.js`, or a path to
+ * one in the mods folder (`~/.eyepatch/mods/foo.user.css`). Same rule as
+ * Agent Bridge's mod ids.
+ */
+function modId(code) {
+  const m = /^(?:(?:\S*\/)?mods\/)?([a-z0-9][a-z0-9._-]*\.user\.(?:js|css))$/i.exec(code);
+  return m ? m[1] : null;
+}
+
+/** Inline Markdown in an agent reply, where mod file names are links. */
+const blockInline = (s) => inline(s, { modLinks: true });
 
 function emphasis(s) {
   return s
@@ -74,7 +89,7 @@ function blocks(lines) {
       html += codeBlock(body.join("\n"), m[2]);
     } else if ((m = HEADING.exec(line))) {
       const level = Math.min(m[1].length, 3);
-      html += `<h${level}>${inline(m[2])}</h${level}>`;
+      html += `<h${level}>${blockInline(m[2])}</h${level}>`;
       i++;
     } else if (HR.test(line)) {
       html += "<hr>";
@@ -92,7 +107,7 @@ function blocks(lines) {
       const align = cells(lines[i + 1]).map((c) => (/^:-+:$/.test(c) ? "center" : /-:$/.test(c) ? "right" : ""));
       i += 2;
       while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(cells(lines[i++]));
-      const td = (tag, c, j) => `<${tag}${align[j] ? ` style="text-align: ${align[j]}"` : ""}>${inline(c)}</${tag}>`;
+      const td = (tag, c, j) => `<${tag}${align[j] ? ` style="text-align: ${align[j]}"` : ""}>${blockInline(c)}</${tag}>`;
       html +=
         `<div class="table-wrap"><table><thead><tr>${head.map((c, j) => td("th", c, j)).join("")}</tr></thead>` +
         `<tbody>${rows.map((r) => `<tr>${head.map((_, j) => td("td", r[j] ?? "", j)).join("")}</tr>`).join("")}</tbody></table></div>`;
@@ -128,7 +143,7 @@ function blocks(lines) {
         if (lines[i].includes("|") && TABLE_SEP.test(lines[i + 1] ?? "") && para.length) break;
         para.push(lines[i++].trim());
       }
-      html += `<p>${para.map(inline).join("<br>")}</p>`;
+      html += `<p>${para.map(blockInline).join("<br>")}</p>`;
     }
   }
   return html;
@@ -161,7 +176,7 @@ function list(lines) {
       const lead = task ? `<input type="checkbox" disabled ${task[1] !== " " ? "checked" : ""}> ` : "";
       const text = task ? first.slice(task[0].length) : first;
       const nested = rest.some((l) => l.trim()) ? blocks(dedent(rest)) : "";
-      return `<li>${lead}${inline(text)}${nested}</li>`;
+      return `<li>${lead}${blockInline(text)}${nested}</li>`;
     })
     .join("");
   return `<${tag}${ordered && start !== 1 ? ` start="${start}"` : ""}>${body}</${tag}>`;

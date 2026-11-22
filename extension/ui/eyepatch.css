@@ -368,6 +368,17 @@ button.tool:hover { background: var(--surface); }
 .md h3 { font-size: var(--fs-h3); line-height: 1.4; font-weight: 600; margin-top: 4px; }
 .md strong { font-weight: 600; }
 .md :not(pre) > code { font-size: var(--fs-code); background: var(--surface); padding: 1px 5px; border-radius: var(--r-xs); }
+/* A mod named in a reply: a pill with its name, linking to it in Settings (plain code if it isn't installed). */
+.md a.mod-link { text-decoration: none; }
+.md a.mod-pill {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%; vertical-align: -2px;
+  height: 24px; padding: 0 9px 0 7px; border-radius: 12px;
+  background: var(--surface); color: var(--text);
+  font-size: var(--fs-small); font-weight: 500; line-height: 1; white-space: nowrap;
+}
+.md a.mod-pill > svg { flex: none; color: var(--text-muted); }
+.md a.mod-pill > span { overflow: hidden; text-overflow: ellipsis; }
+.md a.mod-pill:hover { background: var(--line); }
 .md ul, .md ol { padding: 0 0 0 22px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .md li { padding-left: 4px; }
 .md li > ul, .md li > ol { margin-top: 6px; }
@@ -403,6 +414,9 @@ button.tool:hover { background: var(--surface); }
 .group-items { display: flex; flex-direction: column; padding-left: 24px; }
 /* Mod rows pad instead of using a min-height, so a wrapped description doesn't eat the space between rows. */
 .group-items .row { min-height: 0; padding: 10px 0; } /* 16px icon + 8px gap: mods line up with the site name */
+/* The mod a link in the side panel opened, until the next click or key. */
+.group-items .row[aria-current="true"] { background: var(--surface); margin: 0 -12px; padding: 10px 12px; border-radius: var(--r-md); }
+.group-items .row[aria-current="true"]:focus { outline: none; }
 .row { display: flex; align-items: center; gap: 16px; min-height: 64px; }
 .row.agent { min-height: 72px; }
 .row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }

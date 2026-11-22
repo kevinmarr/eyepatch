@@ -46,6 +46,7 @@ function connectPort() {
       resetThread();
       for (const e of msg.transcript) render(e, { replay: true });
       setState(msg.state);
+      syncModLinks();
     } else if (msg.type === "state") {
       setState(msg.state);
     } else if (msg.type === "event") {
@@ -76,8 +77,19 @@ connectPort();
 reportScheme();
 
 const openTab = (url) => (DEMO ? console.log("open", url) : chrome.tabs.create({ url }));
-/** Agents are installed and authenticated in Settings. */
-const openSettings = (hash = "") => openTab(DEMO ? `options.html${hash}` : chrome.runtime.getURL(`options.html${hash}`));
+/** Agents are installed and authenticated in Settings. Reuses a Settings tab that's already open. */
+async function openSettings(hash = "") {
+  if (DEMO) return openTab(`options.html${hash}`);
+  // Not chrome.runtime.getURL(): Settings is web accessible with a dynamic URL,
+  // so that gives a per-session address that never matches an open Settings tab.
+  const base = `chrome-extension://${chrome.runtime.id}/options.html`;
+  const url = base + hash;
+  // A tab that's still loading has only a pendingUrl.
+  const [open] = (await chrome.tabs.query({})).filter((t) => (t.url || t.pendingUrl)?.startsWith(base));
+  if (!open) return chrome.tabs.create({ url });
+  await chrome.tabs.update(open.id, { url, active: true });
+  await chrome.windows.update(open.windowId, { focused: true });
+}
 
 // ---------- state: header, alerts, message box ----------
 
@@ -89,7 +101,9 @@ function agentLogo(agent) {
 }
 
 function setState(s) {
+  const modsChanged = JSON.stringify(s.mods) !== JSON.stringify(state?.mods);
   state = s;
+  if (modsChanged) syncModLinks();
   const c = s.bridge;
   const agent = currentAgent();
   const hasAgent = c.connected && !c.needsAgent && Boolean(c.agent || agent);
@@ -643,7 +657,35 @@ function renderEmpty() {
 }
 thread.addEventListener("click", (e) => {
   if (e.target.closest(".empty [data-action=settings]")) openSettings();
+  const mod = e.target.closest(".mod-link[href]");
+  if (mod && !(e.metaKey || e.ctrlKey || e.shiftKey)) {
+    e.preventDefault();
+    openSettings(`#mod=${encodeURIComponent(mod.dataset.mod)}`);
+  }
 });
+
+/**
+ * Mod names in replies become pills linking to the mod in Settings, while it exists: a reply
+ * can name a mod before Agent Bridge has picked it up, or after it's deleted.
+ */
+function syncModLinks(root = thread) {
+  const mods = new Map((state?.mods ?? []).map((m) => [m.id, m]));
+  for (const a of root.querySelectorAll(".mod-link")) {
+    const mod = mods.get(a.dataset.mod);
+    if (mod) {
+      a.className = "mod-link mod-pill";
+      a.href = `options.html#mod=${encodeURIComponent(mod.id)}`;
+      a.title = mod.id;
+      a.innerHTML = `${icon("file-code", { size: 14 })}<span>${esc(mod.name)}</span>`;
+    } else if (a.href) {
+      // Not installed (yet, or any more): the file name as the agent wrote it.
+      a.className = "mod-link";
+      a.removeAttribute("href");
+      a.removeAttribute("title");
+      a.innerHTML = `<code>${esc(a.dataset.text)}</code>`;
+    }
+  }
+}
 
 // ---------- thread rendering ----------
 
@@ -780,7 +822,10 @@ function renderUpdate(u) {
         text = { el: append(el("div", "md")), text: "" };
       }
       text.text += u.content.text;
-      keepAtBottom(() => (text.el.innerHTML = markdown(text.text)));
+      keepAtBottom(() => {
+        text.el.innerHTML = markdown(text.text);
+        syncModLinks(text.el);
+      });
       break;
     }
     case "agent_thought_chunk": {
@@ -1106,6 +1151,7 @@ function renderPermission(e) {
     `<h2 class="request-title">${icon(toolIcon(e.toolCall ?? {}), { size: 17 })}<span>${inline(title)}</span></h2>` +
     (plan ? `<div class="md plan-text">${markdown(plan)}</div>` : code ? codeBlock(code.code, code.lang) : "") +
     `<div class="answers"></div>`;
+  syncModLinks(sec);
   sec._title = title;
   sec._kind = toolIcon(e.toolCall ?? {});
   const answers = sec.querySelector(".answers");
