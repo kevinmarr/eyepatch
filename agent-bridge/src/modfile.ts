@@ -9,7 +9,7 @@
  *
  * The file name is the mod's id.
  */
-import type { ModFilter, ModRule } from "./match.js";
+import type { ModFilter, ModRule } from "./match.ts";
 
 export type RunAt = "document_start" | "document_end" | "document_idle";
 

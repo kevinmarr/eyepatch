@@ -1,15 +1,15 @@
 // GM API conformance: runs suite.user.js (and start.user.js) in Eyepatch and
 // compares each result with reference.json, recorded from Violentmonkey.
 //
-//   npm run test:gm                          run in Eyepatch and compare
-//   npm run test:gm -- --reference <dir>     record reference.json from an
+//   bun run test:gm                          run in Eyepatch and compare
+//   bun run test:gm --reference <dir>        record reference.json from an
 //                                            unpacked Violentmonkey (MV3)
 //
-// Needs Playwright and its Chromium, and ports 7457 and 8124 free
+// Needs Playwright and its Chromium, and port 8124 free
 // (EYEPATCH_TEST_EXTENSION runs another copy of the extension; DEBUG=1 logs
 // the page's console).
 // Differences we chose on purpose are in expected-differences.json.
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -77,16 +77,13 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(8124, "127.0.0.1", r));
 
 // ---- the userscript manager ----
-let bridge;
 const home = path.join(TMP, "home");
 if (!referenceExt) {
   fs.mkdirSync(path.join(home, "mods"), { recursive: true });
   for (const f of ["suite.user.js", "start.user.js"]) fs.writeFileSync(path.join(home, "mods", f), file(f));
-  bridge = spawn("npx", ["tsx", "src/index.ts"], { cwd: BRIDGE_DIR, env: { ...process.env, EYEPATCH_HOME: home }, detached: true });
-  let log = "";
-  bridge.stdout.on("data", (d) => (log += d));
-  bridge.stderr.on("data", (d) => (log += d));
-  for (let i = 0; i < 100 && !log.includes("websocket"); i++) await new Promise((r) => setTimeout(r, 200));
+  // Chromium starts Agent Bridge: register it as the test profile's native messaging host.
+  const hosts = path.join(TMP, "profile", "NativeMessagingHosts");
+  spawnSync("bun", ["src/main.ts", "install", "--dir", hosts], { cwd: BRIDGE_DIR, env: { ...process.env, EYEPATCH_HOME: home }, stdio: "inherit" });
 }
 
 const launch = () =>
@@ -163,11 +160,6 @@ results["document-start: values are ready"] = {
 };
 
 await ctx.close();
-if (bridge) {
-  try {
-    process.kill(-bridge.pid);
-  } catch {}
-}
 server.close();
 fs.rmSync(TMP, { recursive: true, force: true });
 

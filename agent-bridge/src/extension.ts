@@ -1,5 +1,4 @@
-import { WebSocketServer, WebSocket } from "ws";
-import { EXTENSION_ID } from "./config.js";
+import type { Connection, Message } from "./native-messaging.ts";
 
 /** Messages the extension sends to Agent Bridge. */
 export type FromExtension =
@@ -44,72 +43,54 @@ type CallOptions = { timeoutMs?: number; skipBarrier?: boolean };
 type Pending = {
   resolve: (v: { result: unknown; warning?: string }) => void;
   reject: (e: Error) => void;
-  timer?: NodeJS.Timeout;
+  timer?: Timer;
 };
 
 /**
- * WebSocket to the extension's service worker. Only one extension
- * connection is active at a time; a new one replaces the old.
+ * Agent Bridge's link to the extension's service worker. Normally there's one
+ * connection for the life of the process (Chrome started us over native
+ * messaging). In dev mode, connections come and go as the extension reloads,
+ * and a new one replaces the old.
  */
-export class ExtensionSocket {
-  private wss: WebSocketServer;
-  private socket: WebSocket | null = null;
+export class Extension {
+  private conn: Connection | null = null;
   private pending = new Map<string, Pending>();
   private seq = 0;
   private listeners: Array<(msg: FromExtension) => void> = [];
   private connectListeners: Array<() => void> = [];
+  private barrier: Promise<unknown> = Promise.resolve();
 
-  constructor(port: number) {
-    this.wss = new WebSocketServer({
-      host: "127.0.0.1",
-      port,
-      // Browsers always send Origin; web pages can't forge a chrome-extension:// one.
-      verifyClient: ({ origin }: { origin?: string }) =>
-        typeof origin === "string" &&
-        (EXTENSION_ID
-          ? origin === `chrome-extension://${EXTENSION_ID}`
-          : origin.startsWith("chrome-extension://")),
+  /** Use a new connection; `connection` receives this link's message handler. */
+  attach(connection: (onMessage: (msg: Message) => void) => Connection): Connection {
+    const conn = connection((msg) => this.conn === conn && this.handle(msg as FromExtension));
+    this.detach();
+    this.conn = conn;
+    console.log("[extension] connected");
+    void conn.closed.then(() => {
+      if (this.conn !== conn) return;
+      console.log("[extension] disconnected");
+      this.detach();
     });
+    for (const l of this.connectListeners) l();
+    return conn;
+  }
 
-    this.wss.on("connection", (ws, req) => {
-      console.log(`[extension] connected (${req.headers.origin})`);
-      this.socket?.close(1000, "replaced");
-      this.socket = ws;
-      ws.on("message", (data) => {
-        let msg: FromExtension;
-        try {
-          msg = JSON.parse(String(data));
-        } catch {
-          return;
-        }
-        this.handle(msg);
-      });
-      ws.on("close", () => {
-        if (this.socket !== ws) return;
-        console.log("[extension] disconnected");
-        this.socket = null;
-        for (const [id, p] of this.pending) {
-          clearTimeout(p.timer);
-          p.reject(new Error("Extension disconnected"));
-          this.pending.delete(id);
-        }
-      });
-      for (const l of this.connectListeners) l();
-    });
-
-    // MV3 service workers stay alive while WebSocket traffic flows (<30s gaps).
-    setInterval(() => this.send({ type: "ping" }), 20_000).unref();
+  private detach() {
+    this.conn = null;
+    for (const [id, p] of this.pending) {
+      clearTimeout(p.timer);
+      p.reject(new Error("Extension disconnected"));
+      this.pending.delete(id);
+    }
   }
 
   get connected() {
-    return this.socket?.readyState === WebSocket.OPEN;
+    return this.conn !== null;
   }
 
-  send(msg: Record<string, unknown>) {
-    if (this.connected) this.socket!.send(JSON.stringify(msg));
+  send(msg: Message) {
+    this.conn?.send(msg);
   }
-
-  private barrier: Promise<unknown> = Promise.resolve();
 
   /**
    * Hold browser calls until `work` settles. Used while mods are being applied
@@ -143,7 +124,7 @@ export class ExtensionSocket {
             reject(new Error(`Browser call ${method} timed out`));
           }, timeoutMs)
         : undefined;
-      this.pending.set(id, { resolve: resolve as (v: { result: unknown; warning?: string }) => void, reject, timer });
+      this.pending.set(id, { resolve: resolve as Pending["resolve"], reject, timer });
       this.send({ type: "tool_call", id, method, params });
     });
   }

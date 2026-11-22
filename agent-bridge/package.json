@@ -1,29 +1,31 @@
 {
   "name": "eyepatch-agent-bridge",
   "version": "0.1.0",
-  "description": "Agent Bridge for the Eyepatch Chrome extension: runs a coding agent over ACP",
-  "scripts": {
-    "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "fake-extension": "tsx scripts/fake-extension.ts",
-    "test": "tsx scripts/test-match.ts && tsx scripts/test-mods.ts",
-    "test:e2e": "node scripts/test-e2e.mjs",
-    "test:gm": "node scripts/gm/test-gm.mjs"
-  },
+  "description": "Agent Bridge for the Eyepatch Chrome extension: runs coding agents over ACP",
   "type": "module",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "agent-bridge": "src/main.ts"
+  },
+  "scripts": {
+    "dev": "bun --watch src/main.ts dev",
+    "register:dev": "bun src/main.ts install --dev",
+    "unregister": "bun src/main.ts uninstall",
+    "build": "bun scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "fake-extension": "bun scripts/fake-extension.ts",
+    "test:e2e": "bun scripts/test-e2e.mjs",
+    "test:gm": "bun scripts/gm/test-gm.mjs"
+  },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.7.0",
     "@modelcontextprotocol/server": "^2.4.0",
-    "ws": "^8.23.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6",
-    "@types/ws": "^8.18.2",
-    "tsx": "^4.23.15",
+    "@types/bun": "^1.4.5",
     "typescript": "^7.0.2"
-  },
-  "private": true,
-  "license": "MIT"
+  }
 }

@@ -1,8 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import type { Subprocess } from "bun";
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import type { LaunchSpec } from "./agents.js";
-import { MODS_DIR } from "./config.js";
+import type { LaunchSpec } from "./agents.ts";
+import { MODS_DIR } from "./config.ts";
 
 /**
  * Sign-in for whichever ACP agent is running, driven from the side panel.
@@ -45,7 +45,7 @@ type Deps = {
   restartAgent: () => Promise<void>;
 };
 
-type SignIn = { methodId: string; name: string; output: string; child?: ChildProcess; cancelled?: boolean };
+type SignIn = { methodId: string; name: string; output: string; child?: Subprocess<"pipe", "pipe", "pipe">; cancelled?: boolean };
 
 export class AuthManager {
   private agentName = "agent";
@@ -184,21 +184,22 @@ export class AuthManager {
       ...(meta?.env ?? {}),
     };
     console.log(`[auth] ${method.id}: ${path.basename(cmd)} ${args.slice(-4).join(" ")}`);
-    const child = spawn(cmd, args, { cwd: MODS_DIR, env, stdio: ["pipe", "pipe", "pipe"] });
+    let child: Subprocess<"pipe", "pipe", "pipe">;
+    try {
+      child = Bun.spawn([cmd, ...args], { cwd: MODS_DIR, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    } catch (e) {
+      return this.fail(`couldn't start: ${(e as Error).message}`);
+    }
     const run: SignIn = { methodId: method.id, name: method.name, output: "", child };
     this.signIn = run;
-    const onData = (d: Buffer) => {
-      run.output = (run.output + stripAnsi(String(d))).slice(-6000);
-      if (this.signIn === run) this.send();
+    const relay = async (stream: ReadableStream<Uint8Array>) => {
+      const decoder = new TextDecoder();
+      for await (const chunk of stream) {
+        run.output = (run.output + stripAnsi(decoder.decode(chunk, { stream: true }))).slice(-6000);
+        if (this.signIn === run) this.send();
+      }
     };
-    child.stdout!.on("data", onData);
-    child.stderr!.on("data", onData);
-    child.on("error", (e) => {
-      if (this.signIn !== run) return;
-      this.signIn = null;
-      this.fail(`couldn't start: ${e.message}`);
-    });
-    child.on("exit", async (code) => {
+    void Promise.all([relay(child.stdout), relay(child.stderr), child.exited]).then(async ([, , code]) => {
       if (this.signIn !== run) return;
       this.signIn = null;
       if (run.cancelled) return this.send();
@@ -238,8 +239,9 @@ export class AuthManager {
   /** A line of input for a running terminal sign-in (e.g. a pasted code). */
   input(text: string) {
     const child = this.signIn?.child;
-    if (!child?.stdin?.writable) return;
+    if (!child || child.exitCode !== null) return;
     child.stdin.write(text + "\n");
+    child.stdin.flush();
     this.signIn!.output += "\n";
     this.send();
   }

@@ -7,7 +7,7 @@ program, using the
 [Agent Client Protocol](https://agentclientprotocol.com).
 
 ```
-side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄ agent
+side panel ⇄ service worker ⇄ native messaging ⇄ Agent Bridge ⇄ ACP (stdio) ⇄ agent
                     │                          │
             runs browser tools ◀── MCP (stdio) ┘
             registers mods as user scripts ◀── watches ~/.eyepatch/mods
@@ -15,11 +15,28 @@ side panel ⇄ service worker ⇄ WebSocket ⇄ Agent Bridge ⇄ ACP (stdio) ⇄
 
 ## Setup
 
-1. Start Agent Bridge (Node 22+):
+Chrome starts Agent Bridge itself when the extension needs it (native
+messaging), and stops it when Chrome quits. Nothing listens on a port. Until
+there's an installer, set it up from source with [Bun](https://bun.sh):
+
+1. Register Agent Bridge with your Chromium-based browsers, then run it in a
+   terminal:
 
    ```bash
-   cd agent-bridge && npm install && npm start
+   cd agent-bridge && bun install && bun run register:dev
    ```
+
+   ```bash
+   bun run dev
+   ```
+
+   `register:dev` (once) points the browsers at a small shim that connects to
+   the Agent Bridge `bun run dev` runs (see [Dev loop](#dev-loop)). To have
+   Chrome run a standalone build instead, `bun run build`, then run
+   `dist/<platform>/agent-bridge install`.
+
+Each Chrome profile (or browser) with Eyepatch runs its own Agent Bridge; they
+share `~/.eyepatch` (mods, chats and installed agents).
 
 2. Load the extension: open `chrome://extensions`, turn on **Developer mode**,
    click **Load unpacked** and pick the `extension/` folder.
@@ -58,7 +75,9 @@ that works with ACP:
 - Agents published as downloads (Claude Agent, Cursor, OpenCode, …) are
   downloaded and checked against the registry's checksum.
 - Agents published as npm packages (Codex, Gemini CLI, GitHub Copilot, …) are
-  installed with the npm that came with Agent Bridge's Node.
+  installed and run with Bun. Agent Bridge is itself a Bun executable that can
+  act as `bun`, so neither Node nor npm is needed. A few npm agents don't run
+  on Bun (Nova, Qoder, MiniMax Code) and aren't offered.
 - When the registry lists a newer version, it's installed in the background and
   used once the agent is idle. The old copy is then removed.
 
@@ -74,8 +93,9 @@ agent is what its new chats start with.
 
 The browser tools reach every agent as an ordinary stdio MCP server named
 `eyepatch`, which ACP requires all agents to support. The agent starts
-`agent-bridge/bin/browser-mcp.mjs` for each chat; it's only a pipe to Agent
-Bridge over a local socket (`~/.eyepatch/tools-<port>.sock`, owner-only),
+`agent-bridge mcp` (Agent Bridge's own executable) for each chat; it's only a
+pipe to Agent Bridge over a local socket (`~/.eyepatch/tools-<pid>.sock`,
+owner-only),
 with a per-chat token that ties its tool calls to that chat's tab.
 
 ## Signing in
@@ -164,7 +184,7 @@ against any `#sha256=…`). Supported:
   `registerMenuCommand` and `unregisterMenuCommand` (listed under the mod in the
   side panel's menu), `openInTab` (http and https), `notification`,
   `setClipboard`, `getResourceText`, `getResourceURL`, `info` and `log`.
-  `npm run test:gm` checks them against Violentmonkey.
+  `bun run test:gm` checks them against Violentmonkey.
 - **Not supported:** other `GM_` functions (`GM_download`, `GM_cookie`, …) throw
   an error saying so, and Settings shows the grant as unsupported.
   `unsafeWindow` is the isolated world's `window`; use `@grant none` or
@@ -177,11 +197,19 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
 
 ## Dev loop
 
-- **Extension:** while Agent Bridge runs, saving any file in `extension/`
+- **Agent Bridge:** `bun run dev` runs it in your terminal with its log on
+  screen, restarting when its source changes. Chrome reaches it through the
+  shim `bun run register:dev` registered, so the extension reloading doesn't
+  restart it or your agents. If it isn't running, Settings and the side panel
+  say so. Without dev mode (a build Chrome starts itself), the log is in
+  `~/.eyepatch/logs/agent-bridge.log`.
+- **Extension:** while `bun run dev` runs, saving any file in `extension/`
   calls `chrome.runtime.reload()`, so you never have to visit
   `chrome://extensions`. Reopen the side panel after a reload.
-- **Agent Bridge:** `npm run dev` restarts on change. The extension reconnects by
-  itself.
+- **Build:** `bun run build` makes a standalone executable for this computer
+  in `dist/` (`--all` for every platform). It includes the Bun runtime, and its
+  modes are `install`, `uninstall`, `dev`, `mcp`, and the native messaging host
+  Chrome starts.
 - **UI without Chrome:** serve `extension/` over HTTP (e.g.
   `python3 -m http.server -d extension`) and open `sidepanel.html?demo` for a
   canned chat with every Markdown element, tool calls and a permission request
@@ -189,27 +217,28 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   word), `options.html?demo` (or `?demo=setup`) for Settings, and
   `design.html` for every component. The design rules are in
   `.claude/skills/eyepatch-ui`.
-- **Without Chrome:** `npm run fake-extension -- "make the h1 red"` drives the
-  Agent Bridge with canned page data. Add `FAKE_AGENT=claude-acp` (any registry
+- **Without Chrome:** `bun run fake-extension "make the h1 red"` starts an
+  Agent Bridge and drives it with canned page data. Add `FAKE_AGENT=claude-acp` (any registry
   id) to pick and install that agent first.
-- **Tests:** `npm test` checks match patterns and mod parsing. `npm run
-  test:e2e` loads the extension in Playwright's Chromium with a real Agent
-  Bridge and checks that mods run: styles, hot swap, userscripts and their GM
-  functions, menu commands, install from a URL, import and export.
-  `npm run test:gm` runs `scripts/gm/suite.user.js` and compares every result
-  with `scripts/gm/reference.json`, recorded from Violentmonkey (`npm run
-  test:gm -- --reference <unpacked Violentmonkey MV3>` records it again).
-  Differences on purpose are in `scripts/gm/expected-differences.json`. It needs Playwright installed, and port 7457
-  free.
+- **Tests:** `bun test` checks match patterns, mod parsing, the native
+  messaging format, and Agent Bridge end to end as Chrome runs it (with a fake
+  agent using the browser tools). `EYEPATCH_TEST_BINARY=dist/<platform>/agent-bridge
+  bun test` runs that against a build. `bun run test:e2e` loads the extension
+  in Playwright's Chromium, which starts a real Agent Bridge (registered as
+  the test profile's native messaging host), and checks that mods run: styles,
+  hot swap, userscripts and their GM functions, menu commands, install from a
+  URL, import and export. `bun run test:gm` runs `scripts/gm/suite.user.js` and
+  compares every result with `scripts/gm/reference.json`, recorded from
+  Violentmonkey (`bun run test:gm --reference <unpacked Violentmonkey MV3>`
+  records it again). Differences on purpose are in
+  `scripts/gm/expected-differences.json`. Both need Playwright installed.
 
 ## Config (env vars)
 
 | Var | Default | |
 | --- | --- | --- |
-| `EYEPATCH_PORT` | `7457` | The extension currently hardcodes 7457 |
 | `EYEPATCH_HOME` | `~/.eyepatch` | Mods live in `$HOME/mods` |
 | `EYEPATCH_AGENT` | the agent picked in the side panel | Run this ACP agent command instead, e.g. `gemini --acp` |
-| `EYEPATCH_EXTENSION_ID` | any extension | Only accept connections from this extension ID |
 
 ## Security notes
 
@@ -218,8 +247,11 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   `reload_tab` run without asking. `run_js` and `navigate` always ask in the side panel, even with
   agents that approve tool calls themselves (Codex); shell commands and
   anything else ask when the agent asks.
-- The WebSocket listens on 127.0.0.1 only and rejects any Origin that isn't a
-  `chrome-extension://` URL. Set `EYEPATCH_EXTENSION_ID` to pin it to yours.
+- Only Eyepatch can start Agent Bridge: its native messaging manifest allows
+  one extension ID (`ilbbppjdddgjalodmdcmgdigaakgblpe`, fixed by the `key` in
+  `extension/manifest.json`). It talks to Chrome over stdin and stdout, and
+  nothing listens on a network port. The browser tools' socket and the dev
+  socket are owner-only.
 
 ## License
 

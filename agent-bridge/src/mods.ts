@@ -1,12 +1,11 @@
-import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { HOME, MODS_DIR } from "./config.js";
-import { CSS_EXT, JS_EXT, parseModFile, parseUserCssMeta, parseUserScriptMeta, type Mod } from "./modfile.js";
+import { HOME, MODS_DIR } from "./config.ts";
+import { CSS_EXT, JS_EXT, parseModFile, parseUserCssMeta, parseUserScriptMeta, type Mod } from "./modfile.ts";
 
-export type { Mod } from "./modfile.js";
+export type { Mod } from "./modfile.ts";
 
 const STATE_FILE = path.join(HOME, "mods-state.json");
 const CACHE_DIR = path.join(HOME, "cache");
@@ -84,7 +83,7 @@ async function cachedFetch(url: string): Promise<{ body: Buffer; mimeType: strin
   if (!/^https?:\/\//i.test(url)) throw new Error("only http and https URLs are supported");
   const res = await fetch(url, { signal: AbortSignal.timeout(20_000), redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const body = Buffer.from(await res.arrayBuffer());
+  const body = Buffer.from(await res.bytes());
   const mimeType = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
   await fsp.mkdir(CACHE_DIR, { recursive: true });
   await fsp.writeFile(file, body);
@@ -131,10 +130,14 @@ async function resolveAssets(mod: Mod) {
 export async function revealMod(id: string) {
   const file = modPath(id);
   await fsp.access(file);
-  const cb = (e: Error | null) => e && process.platform !== "win32" && console.error(`[mods] couldn't show ${file}:`, e.message);
-  if (process.platform === "darwin") execFile("open", ["-R", file], cb);
-  else if (process.platform === "win32") execFile("explorer", [`/select,${file}`], cb);
-  else execFile("xdg-open", [MODS_DIR], cb);
+  const cmd =
+    process.platform === "darwin" ? ["open", "-R", file] : process.platform === "win32" ? ["explorer", `/select,${file}`] : ["xdg-open", MODS_DIR];
+  try {
+    // Explorer exits with 1 even when it worked, so only a failure to start counts.
+    Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
+  } catch (e) {
+    console.error(`[mods] couldn't show ${file}:`, (e as Error).message);
+  }
 }
 
 /** Delete a mod. Its file moves to ~/.eyepatch/trash, in case it's wanted back. */
@@ -185,7 +188,7 @@ export async function importMod(fileName: string, content: string): Promise<stri
 /** Calls back with the ids of mods whose files changed (debounced). */
 export function watchMods(onChange: (changedIds: string[]) => void) {
   let changed = new Set<string>();
-  let timer: NodeJS.Timeout | undefined;
+  let timer: Timer | undefined;
   fs.watch(MODS_DIR, (_event, filename) => {
     if (!filename || !ID_RE.test(filename)) return;
     changed.add(filename);
@@ -201,7 +204,7 @@ export function watchMods(onChange: (changedIds: string[]) => void) {
 /** Calls back (debounced) when any file in `dir` changes. */
 export function watchDir(dir: string, onChange: () => void) {
   if (!fs.existsSync(dir)) return;
-  let timer: NodeJS.Timeout | undefined;
+  let timer: Timer | undefined;
   fs.watch(dir, { recursive: true }, () => {
     clearTimeout(timer);
     timer = setTimeout(onChange, 200);

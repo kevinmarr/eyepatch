@@ -52,12 +52,14 @@ function render(s) {
 
 // ---------- setup ----------
 
-const BRIDGE_COMMAND = "cd agent-bridge && npm install && npm start";
+// Until there's an installer: register the dev host once, then run Agent Bridge in a terminal.
+const INSTALL_COMMAND = "cd agent-bridge && bun install && bun run register:dev && bun run dev";
+const START_COMMAND = "cd agent-bridge && bun run dev";
 
 function renderSetup(s) {
   const hasAgent = Boolean(s.agents?.custom || s.agents?.list.some((a) => a.installedVersion));
   const steps = [
-    { done: s.connected, name: "Agent Bridge running", todo: "Start Agent Bridge" },
+    { done: s.connected, name: "Agent Bridge running", todo: s.bridgeProblem === "dev_down" ? "Start Agent Bridge" : "Install Agent Bridge" },
     { done: s.userScripts, name: "User scripts allowed", todo: "Allow user scripts" },
     { done: hasAgent, name: "Agent installed", todo: "Install an agent" },
   ];
@@ -70,8 +72,12 @@ function renderSetup(s) {
     return;
   }
   $("setup-count").textContent = `${done} of ${steps.length}`;
+  const command = s.bridgeProblem === "dev_down" ? START_COMMAND : INSTALL_COMMAND;
+  // Anything else Chrome reported (e.g. it crashed on start) is worth showing.
+  const problem = s.bridgeProblem && !["missing", "dev_down"].includes(s.bridgeProblem) ? s.bridgeProblem : null;
   const bodies = [
-    `<div class="command"><code>${esc(BRIDGE_COMMAND)}</code><button type="button" class="icon-btn" data-copy="${esc(BRIDGE_COMMAND)}" aria-label="Copy command" title="Copy">${icon("copy", { size: 15 })}</button></div>` +
+    `<div class="command"><code>${esc(command)}</code><button type="button" class="icon-btn" data-copy="${esc(command)}" aria-label="Copy command" title="Copy">${icon("copy", { size: 15 })}</button></div>` +
+      (problem ? `<span class="error-text">${esc(problem)}</span>` : "") +
       `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}Waiting for Agent Bridge…</span>`,
     `<div><button type="button" class="btn primary" data-action="user-scripts">Open extension settings</button></div>`,
     s.connected ? `<div><button type="button" class="btn primary" data-action="add-agent">Choose an agent</button></div>` : "",
@@ -294,6 +300,7 @@ function renderAddStatus(s) {
       verifying: `Checking the download…`,
       extracting: `Unpacking ${esc(ins.name)}…`,
       npm: `Installing ${esc(ins.name)}…`,
+      waiting: `Waiting for another install to finish…`,
       checking: `Installing ${esc(ins.name)}…`,
     }[ins.phase] ?? `Installing ${esc(ins.name)}…`;
     parts.push(

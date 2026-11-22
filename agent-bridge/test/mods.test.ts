@@ -1,19 +1,7 @@
-// Run with: npx tsx scripts/test-mods.ts
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { modApplies } from "../src/match.js";
-import { parseUserCss, parseUserScript, splitSections } from "../src/modfile.js";
-
-let passed = 0;
-let failed = 0;
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-  } catch (e) {
-    failed++;
-    console.log(`FAIL ${name}\n  ${(e as Error).message.split("\n").join("\n  ")}`);
-  }
-}
+import { modApplies } from "../src/match.ts";
+import { parseUserCss, parseUserScript, splitSections } from "../src/modfile.ts";
 
 const userscript = (header: string, body = "console.log(1);") =>
   `// ==UserScript==\n${header.trim().split("\n").map((l) => `// ${l.trim()}`).join("\n")}\n// ==/UserScript==\n\n${body}\n`;
@@ -233,6 +221,3 @@ test("preprocessors aren't supported", () => {
   assert.match(parseUserCss("d.user.css", usercss(`a{}`, "@name P\n@preprocessor stylus")).error ?? "", /stylus/);
   assert.match(parseUserCss("d.user.css", `a{}`).error ?? "", /header/);
 });
-
-console.log(failed ? `${failed} failed, ${passed} passed` : `all ${passed} passed`);
-process.exitCode = failed ? 1 : 0;

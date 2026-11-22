@@ -1,9 +1,10 @@
 // End-to-end check of mods in a real browser: loads the extension in
-// Playwright's Chromium, runs a real Agent Bridge on a temporary
-// EYEPATCH_HOME, and serves test pages on 127.0.0.1:8123.
-// Run with: npm run test:e2e (needs Playwright and its Chromium, and ports
-// 7457 and 8123 free).
-import { spawn } from "node:child_process";
+// Playwright's Chromium, which starts a real Agent Bridge (registered as the
+// test profile's native messaging host) on a temporary EYEPATCH_HOME, and
+// serves test pages on 127.0.0.1:8123.
+// Run with: bun run test:e2e (needs Playwright and its Chromium, and port
+// 8123 free).
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -51,11 +52,10 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(8123, "127.0.0.1", r));
 
 // ---- Agent Bridge ----
-const bridge = spawn("npx", ["tsx", "src/index.ts"], { cwd: BRIDGE_DIR, env: { ...process.env, EYEPATCH_HOME: HOME }, detached: true });
-let bridgeLog = "";
-bridge.stdout.on("data", (d) => (bridgeLog += d));
-bridge.stderr.on("data", (d) => (bridgeLog += d));
-for (let i = 0; i < 100 && !bridgeLog.includes("websocket"); i++) await new Promise((r) => setTimeout(r, 200));
+// Chromium looks for native messaging hosts in the profile folder too.
+const HOSTS = path.join(HERE, "profile", "NativeMessagingHosts");
+spawnSync("bun", ["src/main.ts", "install", "--dir", HOSTS], { cwd: BRIDGE_DIR, env: { ...process.env, EYEPATCH_HOME: HOME }, stdio: "inherit" });
+const bridgeLog = () => fs.readFileSync(path.join(HOME, "logs", "agent-bridge.log"), "utf8");
 
 const write = (name, content) => fs.writeFileSync(path.join(MODS, name), content);
 write("red.user.css", `/* ==UserStyle==\n@name Red heading\n@version 1\n==/UserStyle== */\n@-moz-document domain("127.0.0.1") {\n  h1 { color: rgb(255, 0, 0); }\n}\n`);
@@ -246,8 +246,12 @@ for (let i = 0; i < 50; i++) {
 }
 check("script change reloads the tab", changedVal === "changed" && (await page.evaluate(() => window.marker)) === undefined, changedVal);
 
-// Mods keep running with Agent Bridge stopped and the service worker restarted.
-process.kill(-bridge.pid);
+// Mods keep running with Agent Bridge stopped (and gone, so the extension
+// can't start it again) and the service worker restarted.
+fs.rmSync(HOSTS, { recursive: true, force: true });
+const bridgePid = Number([...bridgeLog().matchAll(/started \(pid (\d+)\)/g)].pop()?.[1]);
+check("Chromium started Agent Bridge", bridgePid > 0);
+if (bridgePid) process.kill(bridgePid);
 await new Promise((r) => setTimeout(r, 500));
 const cdp = await ctx.newCDPSession(page);
 await cdp.send("ServiceWorker.enable");
@@ -260,11 +264,8 @@ check("…with their GM storage", Number(await waitDs("count")) === before + 1, 
 
 check("no console errors from mods", !errors.some((e) => /\[mod /.test(e)), errors.join("\n"));
 console.log(failures ? `\n${failures} failed` : "\nall passed");
-if (failures) console.log("--- bridge log ---\n" + bridgeLog.slice(-3000));
+if (failures) console.log("--- bridge log ---\n" + bridgeLog().slice(-3000));
 await ctx.close();
-try {
-  process.kill(-bridge.pid);
-} catch {}
 server.close();
 fs.rmSync(HERE, { recursive: true, force: true });
 process.exit(failures ? 1 : 0);

@@ -1,19 +1,27 @@
-// Headless stand-in for the Chrome extension, for testing Agent Bridge:
-//   npm start                      (in one terminal)
-//   npm run fake-extension -- "make the page background red"
+// Headless stand-in for the Chrome extension, for trying Agent Bridge with a
+// real agent. Starts Agent Bridge itself and talks to it the way Chrome does
+// (native messaging over stdio); its log goes to stderr.
+//   bun run fake-extension "make the page background red"
 // FAKE_AGENT=<registry id> picks (and installs) that agent for the tab first.
 // FAKE_TABS='[{"tab":1,"agent":"claude-acp","prompt":"..."},{"tab":2,...}]'
 // runs several tabs at once, each with its own chat.
 // Answers browser tool calls with canned data for https://example.com and
 // auto-approves permission requests.
-import { WebSocket } from "ws";
+import path from "node:path";
+import { Decoder, encode, Unchunker } from "../src/native-messaging.ts";
 
-const PORT = Number(process.env.EYEPATCH_PORT ?? 7457);
 type Tab = { tab: number; agent?: string; prompt: string };
 const tabs: Tab[] = process.env.FAKE_TABS
   ? JSON.parse(process.env.FAKE_TABS)
   : [{ tab: 1, agent: process.env.FAKE_AGENT, prompt: process.argv.slice(2).join(" ") || "What page am I on? Use the browser tools." }];
-const ws = new WebSocket(`ws://127.0.0.1:${PORT}`, { origin: "chrome-extension://fake" });
+const bridge = Bun.spawn(["bun", path.join(import.meta.dir, "../src/main.ts"), "host"], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+const link = {
+  send(json: string) {
+    bridge.stdin.write(encode(JSON.parse(json)));
+    bridge.stdin.flush();
+  },
+};
+process.on("exit", () => bridge.kill());
 
 const page = { url: "https://example.com/", title: "Example Domain" };
 const html =
@@ -37,14 +45,24 @@ type TabState = { prompted: boolean; selecting: boolean; done: boolean; text: st
 const state = new Map<number, TabState>(tabs.map((t) => [t.tab, { prompted: false, selecting: false, done: false, text: "" }]));
 const label = (tabId: number) => (tabs.length > 1 ? `[tab ${tabId}] ` : "");
 
-ws.on("open", () => {
-  ws.send(JSON.stringify({ type: "hello", tabs: tabs.map((t) => t.tab) }));
-  for (const t of tabs) ws.send(JSON.stringify({ type: "open_chat", tabId: t.tab }));
-});
+link.send(JSON.stringify({ type: "hello", tabs: tabs.map((t) => t.tab) }));
+for (const t of tabs) link.send(JSON.stringify({ type: "open_chat", tabId: t.tab }));
 
 let pageCalls = 0;
-ws.on("message", (data) => {
-  const msg = JSON.parse(String(data));
+const decoder = new Decoder();
+const unchunker = new Unchunker();
+void (async () => {
+  for await (const chunk of bridge.stdout) {
+    for (const raw of decoder.push(chunk)) {
+      const msg = unchunker.take(raw);
+      if (msg) onMessage(msg);
+    }
+  }
+  console.error("Agent Bridge exited");
+  process.exit(1);
+})();
+
+function onMessage(msg: any) {
   const t = tabs.find((x) => x.tab === msg.tabId);
   const st = t && state.get(t.tab)!;
   switch (msg.type) {
@@ -64,7 +82,7 @@ ws.on("message", (data) => {
         if (!st.selecting) {
           st.selecting = true;
           console.log(`${label(t.tab)}[chat] switching to ${t.agent}`);
-          ws.send(JSON.stringify({ type: "agent_select", tabId: t.tab, id: t.agent }));
+          link.send(JSON.stringify({ type: "agent_select", tabId: t.tab, id: t.agent }));
         }
         break;
       }
@@ -72,7 +90,7 @@ ws.on("message", (data) => {
       if (c.ready && c.sessionId && !st.prompted) {
         st.prompted = true;
         console.log(`${label(t.tab)}> (${c.agent}, ${c.model?.current ?? "no model menu"}) ${t.prompt}`);
-        ws.send(JSON.stringify({ type: "prompt", tabId: t.tab, text: t.prompt, page: { ...page, tabId: t.tab } }));
+        link.send(JSON.stringify({ type: "prompt", tabId: t.tab, text: t.prompt, page: { ...page, tabId: t.tab } }));
       }
       break;
     }
@@ -93,13 +111,13 @@ ws.on("message", (data) => {
         process.env.FAKE_NAVIGATE && msg.method !== "apply_mods" && ++pageCalls > 1
           ? `Note: the user navigated this tab from ${page.url} to https://example.org/other since their message; this result is from the new page.`
           : undefined;
-      ws.send(JSON.stringify(fn ? { type: "tool_result", id: msg.id, result: fn(msg.params), warning } : { type: "tool_result", id: msg.id, error: "unknown" }));
+      link.send(JSON.stringify(fn ? { type: "tool_result", id: msg.id, result: fn(msg.params), warning } : { type: "tool_result", id: msg.id, error: "unknown" }));
       break;
     }
     case "permission_request": {
       const allow = msg.options.find((o: any) => o.kind === "allow_once") ?? msg.options[0];
       console.log(`\n${label(msg.tabId)}[permission] ${msg.toolCall?.title} -> ${allow.name}`);
-      ws.send(JSON.stringify({ type: "permission_response", id: msg.id, optionId: allow.optionId }));
+      link.send(JSON.stringify({ type: "permission_response", id: msg.id, optionId: allow.optionId }));
       break;
     }
     case "error":
@@ -113,8 +131,4 @@ ws.on("message", (data) => {
       if ([...state.values()].every((x) => x.done)) setTimeout(() => process.exit(0), 500);
       break;
   }
-});
-ws.on("error", (e) => {
-  console.error("Could not connect to Agent Bridge:", e.message);
-  process.exit(1);
-});
+}

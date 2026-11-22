@@ -1,15 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import { AgentProcess } from "./agent-process.js";
-import type { AgentManager, SelectKind } from "./agents.js";
-import { AUTH_REQUIRED } from "./auth.js";
-import type { ToolSocket } from "./tool-socket.js";
-import { HOME, MODS_DIR } from "./config.js";
-import type { ExtensionSocket, FromExtension, PageInfo, PickedElement, PromptImage } from "./extension-socket.js";
-import { modApplies } from "./match.js";
-import { isModFile } from "./modfile.js";
-import { loadMods, type Mod } from "./mods.js";
+import { AgentProcess } from "./agent-process.ts";
+import type { AgentManager, SelectKind } from "./agents.ts";
+import { AUTH_REQUIRED } from "./auth.ts";
+import type { ToolServer } from "./tools.ts";
+import { HOME, MODS_DIR } from "./config.ts";
+import type { Extension, FromExtension, PageInfo, PickedElement, PromptImage } from "./extension.ts";
+import { modApplies } from "./match.ts";
+import { isModFile } from "./modfile.ts";
+import { loadMods, type Mod } from "./mods.ts";
 
 /**
  * One chat per browser tab. Each chat has its own agent (tabs can use
@@ -150,9 +150,9 @@ export class Chats {
   private optionsOpen = false;
 
   constructor(
-    private readonly extension: ExtensionSocket,
+    private readonly extension: Extension,
     private readonly catalog: AgentManager,
-    private readonly toolSocket: ToolSocket,
+    private readonly toolServer: ToolServer,
   ) {
     extension.on((msg) => this.onMessage(msg));
     extension.onConnect(() => {
@@ -272,7 +272,7 @@ export class Chats {
       await this.endSession(chat);
       chat.agentId = null;
     }
-    this.agents.get(id)?.stop();
+    await this.agents.get(id)?.stop();
     this.agents.delete(id);
     await this.catalog.remove(id);
     this.adoptDefault();
@@ -478,11 +478,18 @@ export class Chats {
     return agent;
   }
 
+  /** Save every chat and stop every agent (Agent Bridge is exiting). */
+  async shutdown() {
+    await Promise.all([...this.chats.values()].map((c) => this.saveHistory(c)));
+    await Promise.all([...this.agents.values()].map((a) => a.stop()));
+    this.agents.clear();
+  }
+
   /** Stop agent processes no tab uses anymore (unless the Options page is showing them). */
   private stopUnusedAgents() {
     for (const [id, agent] of this.agents) {
       if (!this.chatsOn(id).length && !(this.optionsOpen && this.catalog.isInstalled(id))) {
-        agent.stop();
+        void agent.stop();
         this.agents.delete(id);
       }
     }
@@ -514,7 +521,7 @@ export class Chats {
 
     // Browser tools for this tab only: a stdio MCP server the agent starts,
     // which connects back to Agent Bridge.
-    const tools = this.toolSocket.register(async (method, args, options) => {
+    const tools = this.toolServer.register(async (method, args, options) => {
       if (GUARDED_TOOLS.includes(method) && !(await this.approveTool(chat, method, args))) {
         throw new Error("The user declined this.");
       }
@@ -851,7 +858,7 @@ export class Chats {
       events: compact(chat.events),
     };
     const file = historyFile(chat.sessionId);
-    await fs.writeFile(file, JSON.stringify(record)).catch((e) => console.warn("[chats] couldn't save history:", e.message));
+    await Bun.write(file, JSON.stringify(record)).catch((e) => console.warn("[chats] couldn't save history:", e.message));
     // A restored chat that went on in a new session replaces its old copy.
     if (chat.restoredFrom && chat.restoredFrom !== chat.sessionId) {
       await fs.rm(historyFile(chat.restoredFrom), { force: true });
@@ -911,7 +918,7 @@ const historyFile = (sessionId: string) => path.join(SESSIONS_DIR, `${sessionId.
 
 async function readRecord(file: string): Promise<SavedChat | null> {
   try {
-    const r = JSON.parse(await fs.readFile(file, "utf8"));
+    const r = await Bun.file(file).json();
     if (typeof r?.sessionId !== "string" || !Array.isArray(r.events)) return null;
     return {
       sessionId: r.sessionId,

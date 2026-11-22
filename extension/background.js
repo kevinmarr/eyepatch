@@ -3,19 +3,19 @@ import { modApplies } from "./match.js";
 import { toolTitle } from "./tool-names.js";
 import { cssCode, removeCssCode, reportCode, scriptsFor, usesStorage, worldIdOf } from "./userscripts.js";
 
-// Eyepatch service worker: owns the WebSocket to Agent Bridge (the local
-// program that runs the agents), runs browser tools for them, registers mods
-// as user scripts, and relays each tab's chat between Agent Bridge and that
-// tab's side panel. Every tab has its own side panel and its own chat.
+// Eyepatch service worker: owns the connection to Agent Bridge (the local
+// program that runs the agents, which Chrome starts for us over native
+// messaging), runs browser tools for them, registers mods as user scripts,
+// and relays each tab's chat between Agent Bridge and that tab's side panel.
+// Every tab has its own side panel and its own chat.
 
-const BRIDGE_PORT = 7457;
-const BRIDGE_URL = `ws://127.0.0.1:${BRIDGE_PORT}`;
-const PROBE_URL = `http://127.0.0.1:${BRIDGE_PORT}/`;
+const BRIDGE_HOST = "eyepatch.agent_bridge";
 const MAX_TRANSCRIPT = 2000;
 const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model API anyway
 
-let ws = null;
-let connected = false;
+let bridge = null; // the native messaging port
+let connected = false; // Agent Bridge answered on `bridge`
+let bridgeProblem = null; // why it isn't connected: "missing", "dev_down", or what Chrome said
 let agents = null; // agent catalog and install progress, from Agent Bridge
 const auths = new Map(); // agent id -> sign-in state
 const chats = new Map(); // tab id -> { agentId, agent, ready, busy, model, ... }
@@ -74,64 +74,78 @@ const hasChat = (tabId) => chats.has(tabId) || panels.has(tabId);
 
 // ---------- Agent Bridge connection ----------
 
-let probing = false;
+let retry = null;
 
-async function connect() {
-  if (probing) return;
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  // Chrome logs every refused WebSocket as an extension error, so check with a
-  // plain fetch first and only open the socket once something is listening.
-  // (Agent Bridge answers non-upgrade HTTP requests with 426; any response is fine.)
-  probing = true;
-  try {
-    await fetch(PROBE_URL, { cache: "no-store" });
-  } catch {
-    // Agent Bridge not running. Retry fast while a panel is open; otherwise the alarm retries.
-    if (panels.size || optionsPages.size) setTimeout(connect, 2000);
-    return;
-  } finally {
-    probing = false;
-  }
-  if (ws) return;
-  const socket = new WebSocket(BRIDGE_URL);
-  ws = socket;
-  socket.onopen = async () => {
-    connected = true;
-    const tabs = (await chrome.tabs.query({}).catch(() => [])).map((t) => t.id);
-    send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version, tabs });
-    // Panels that are already open get their chat back.
-    for (const tabId of panels.keys()) send({ type: "open_chat", tabId });
-    if (optionsPages.size) send({ type: "options_open" });
-    broadcastState();
-  };
-  socket.onclose = () => {
-    if (ws !== socket) return;
-    ws = null;
+/**
+ * Connect to Agent Bridge. Chrome starts it (or, in development, the shim that
+ * reaches `bun run dev`) and stops it when this port closes. An open port also
+ * keeps this service worker alive, so agents keep working with no panel open.
+ */
+function connect() {
+  if (bridge) return;
+  clearTimeout(retry);
+  const port = chrome.runtime.connectNative(BRIDGE_HOST);
+  bridge = port;
+  const chunks = new Map(); // id -> parts of a message too big for one (see agent-bridge/src/native-messaging.ts)
+  port.onMessage.addListener((msg) => {
+    if (bridge !== port) return;
+    if (msg.type === "chunk") {
+      const parts = chunks.get(msg.id) ?? [];
+      parts.push(msg.data);
+      if (!msg.last) return chunks.set(msg.id, parts);
+      chunks.delete(msg.id);
+      msg = JSON.parse(parts.join(""));
+    }
+    if (msg.type === "dev_bridge_down") {
+      bridgeProblem = "dev_down";
+      return broadcastState();
+    }
+    if (!connected) {
+      connected = true;
+      bridgeProblem = null;
+      broadcastState();
+    }
+    onBridgeMessage(msg).catch((e) => console.error("[eyepatch]", e));
+  });
+  port.onDisconnect.addListener(() => {
+    // Reading lastError also keeps Chrome from logging it as an uncaught error.
+    const error = chrome.runtime.lastError?.message ?? "";
+    if (bridge !== port) return;
+    bridge = null;
+    if (/not found/i.test(error)) bridgeProblem = "missing";
+    else if (bridgeProblem !== "dev_down") bridgeProblem = error || "Agent Bridge stopped";
+    if (connected) console.warn("[eyepatch] Agent Bridge disconnected:", error || "exited");
     connected = false;
     declineTabRequests("Agent Bridge disconnected");
     agents = null;
     auths.clear();
     for (const c of chats.values()) Object.assign(c, { ready: false, busy: false });
     broadcastState();
-    setTimeout(connect, 2000);
-  };
-  socket.onerror = () => {};
-  socket.onmessage = (ev) => {
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch {
-      return;
-    }
-    onBridgeMessage(msg).catch((e) => console.error("[eyepatch]", e));
-  };
+    // Retry soon while someone's looking; otherwise the alarm retries.
+    if (panels.size || optionsPages.size) retry = setTimeout(connect, 2000);
+  });
+  // Messages queue until Agent Bridge has started.
+  chrome.tabs.query({}).then(
+    (tabs) => {
+      send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version, tabs: tabs.map((t) => t.id) });
+      // Panels that are already open get their chat back.
+      for (const tabId of panels.keys()) send({ type: "open_chat", tabId });
+      if (optionsPages.size) send({ type: "options_open" });
+    },
+    () => {},
+  );
 }
 
 function send(msg) {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  try {
+    bridge?.postMessage(msg);
+  } catch {
+    // Disconnected meanwhile; onDisconnect cleans up.
+  }
 }
 
-// Service workers get suspended; an alarm brings us back to reconnect.
+// If Agent Bridge isn't running (not installed yet, or it crashed), an alarm
+// brings this service worker back to try again.
 chrome.alarms.create("reconnect", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => a.name === "reconnect" && connect());
 chrome.runtime.onStartup.addListener(connect);
@@ -144,8 +158,6 @@ connect();
 
 async function onBridgeMessage(msg) {
   switch (msg.type) {
-    case "ping":
-      return;
     case "chat":
       chats.set(msg.tabId, msg.chat);
       updateBadge(msg.tabId);
@@ -202,6 +214,7 @@ function state(tabId) {
   return {
     bridge: {
       connected,
+      problem: bridgeProblem,
       agentId: chat?.agentId ?? null,
       agent: chat?.agent ?? null,
       ready: Boolean(chat?.ready),
@@ -237,7 +250,7 @@ function broadcastState(tabId) {
 
 /** What the Options page shows: setup steps and every installed agent's sign-in. */
 function optionsState() {
-  return { connected, agents, auths: Object.fromEntries(auths), userScripts: userScriptsAvailable(), mods: modList };
+  return { connected, bridgeProblem, agents, auths: Object.fromEntries(auths), userScripts: userScriptsAvailable(), mods: modList };
 }
 
 chrome.runtime.onConnect.addListener((port) => {

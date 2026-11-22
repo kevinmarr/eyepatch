@@ -1,10 +1,12 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { Readable, Writable } from "node:stream";
+import type { Subprocess } from "bun";
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import type { AgentManager } from "./agents.js";
-import { AuthManager } from "./auth.js";
-import { MODS_DIR } from "./config.js";
+import type { AgentManager } from "./agents.ts";
+import { AuthManager } from "./auth.ts";
+import { MODS_DIR, VERSION } from "./config.ts";
+import { logStream } from "./log.ts";
+
+type Child = Subprocess<"pipe", "pipe", "pipe">;
 
 /** What a chat registers to receive its session's traffic. */
 export type SessionHandlers = {
@@ -35,7 +37,7 @@ export class AgentProcess {
   /** Whether prompts can include images. */
   images = false;
   readonly auth: AuthManager;
-  private child?: ChildProcess;
+  private child?: Child;
   private sessions = new Map<string, SessionHandlers>();
   private quickExits = 0;
   private stopped = false;
@@ -67,15 +69,19 @@ export class AgentProcess {
     this.child = undefined; // so its exit handler doesn't schedule another restart
     this.reset();
     old?.kill();
+    await this.deps.agents.markStopped(this.id); // a newer copy may be what starts now
     await this.start().catch((e) => console.error(`[${this.id}] restart failed:`, e));
   }
 
-  stop() {
+  /** Stop the process; resolves once it has exited. */
+  async stop() {
     this.stopped = true;
     const old = this.child;
     this.child = undefined;
     this.reset();
     old?.kill();
+    await this.deps.agents.markStopped(this.id);
+    await old?.exited;
   }
 
   async start() {
@@ -84,32 +90,49 @@ export class AgentProcess {
     void this.deps.agents.pruneOldVersions(this.id);
     const { cmd, args } = spec;
     console.log(`[${this.id}] starting: ${path.basename(cmd)} ${args.join(" ")}`);
-    const child = spawn(cmd, args, {
-      cwd: MODS_DIR,
-      stdio: ["pipe", "pipe", "inherit"],
-      // Claude Code defers MCP tools behind a ToolSearch step by default; our
-      // browser tools are used in nearly every turn, so load them upfront.
-      env: { ENABLE_TOOL_SEARCH: "false", ...process.env, ...spec.env },
-    });
-    this.child = child;
-    child.on("error", (e) => console.error(`[${this.id}] couldn't start ${cmd}: ${e.message}`));
+    void this.deps.agents.markRunning(this.id);
     const startedAt = Date.now();
-    child.on("exit", (code, signal) => {
-      if (this.child !== child) return;
-      // Back off if it keeps dying right away (broken install, bad config).
-      this.quickExits = Date.now() - startedAt < 15_000 ? this.quickExits + 1 : 0;
-      const delay = Math.min(2000 * 2 ** this.quickExits, 60_000);
-      console.error(`[${this.id}] exited (${signal ?? code}); restarting in ${delay / 1000}s`);
-      this.child = undefined;
-      this.reset();
-      setTimeout(() => {
-        if (!this.child && !this.stopped) this.start().catch((e) => console.error(`[${this.id}] restart failed:`, e));
-      }, delay);
-    });
+    let child: Child;
+    try {
+      child = Bun.spawn([cmd, ...args], {
+        cwd: MODS_DIR,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        // Claude Code defers MCP tools behind a ToolSearch step by default; our
+        // browser tools are used in nearly every turn, so load them upfront.
+        env: { ENABLE_TOOL_SEARCH: "false", ...process.env, ...spec.env },
+        onExit: (_proc, code, signal) => {
+          if (this.child !== child) return;
+          // Back off if it keeps dying right away (broken install, bad config).
+          this.quickExits = Date.now() - startedAt < 15_000 ? this.quickExits + 1 : 0;
+          const delay = Math.min(2000 * 2 ** this.quickExits, 60_000);
+          console.error(`[${this.id}] exited (${signal ?? code}); restarting in ${delay / 1000}s`);
+          this.child = undefined;
+          this.reset();
+          setTimeout(() => {
+            if (!this.child && !this.stopped) this.start().catch((e) => console.error(`[${this.id}] restart failed:`, e));
+          }, delay);
+        },
+      }) as Child;
+    } catch (e) {
+      throw new Error(`couldn't start ${cmd}: ${(e as Error).message}`);
+    }
+    this.child = child;
+    void logStream(this.id, child.stderr);
 
+    const stdin = child.stdin;
     const stream = acp.ndJsonStream(
-      Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          stdin.write(chunk);
+          stdin.flush();
+        },
+        close() {
+          stdin.end();
+        },
+      }),
+      child.stdout,
     );
 
     const app = acp
@@ -138,7 +161,7 @@ export class AgentProcess {
         auth: { terminal: true },
         _meta: { "terminal-auth": true },
       },
-      clientInfo: { name: "eyepatch", version: "0.1.0" },
+      clientInfo: { name: "eyepatch", version: VERSION },
     });
     if (this.conn !== conn) return; // restarted meanwhile
     this.name = init.agentInfo?.title ?? init.agentInfo?.name ?? this.name;

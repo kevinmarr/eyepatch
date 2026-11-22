@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Change how any website looks and works by chatting with a coding agent on your computer.",
   "minimum_chrome_version": "135",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs4hSGJz5li7fXzlaZUqAdxXsjUryOD3OUtRrSv7PoD27muyH5KEr5lGbPbKeBIdkhZGE/KbpYsLCFTUez+lCx3l0dO1zXq989lEEczntop7iuHL7e3Xm/qExq/+OOdRxv67WhvMR+Bp9xhY9dp6RxWRSnfNIK5R3ww3sZtU9/QhPeiJ2eJpxbEzEVZgPIg2liCDpP0eqnUX5I6CQGq86uOM19Y9jRsGSXpEGrkXOly79LJ4ReR8vHWc4PPZXuQGZkP60jCWFazX2D82Jvfd5jr20cAFIayiOLu2meBq2f92hJulB4VljaaqCB1bcCWFGFdJ2x4AB+Y1g4jCRiMkZxwIDAQAB",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -18,6 +19,7 @@
     "storage",
     "alarms",
     "notifications",
+    "nativeMessaging",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [

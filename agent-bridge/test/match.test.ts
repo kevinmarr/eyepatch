@@ -1,5 +1,5 @@
-// Run with: npx tsx scripts/test-match.ts
-import { matchesPattern as m, modApplies } from "../src/match.js";
+import { expect, test } from "bun:test";
+import { matchesPattern as m, modApplies } from "../src/match.ts";
 
 const cases: [string, string, boolean][] = [
   ["https://substack.com/*", "https://substack.com/home/post/p-1", true],
@@ -17,17 +17,10 @@ const cases: [string, string, boolean][] = [
   ["<all_urls>", "https://a.b/c", true],
   ["https://example.com/a.b", "https://example.com/aXb", false],
 ];
-let fail = 0;
-for (const [p, u, want] of cases) {
-  const got = m(p, u);
-  if (got !== want) {
-    fail++;
-    console.log("FAIL", p, u, "got", got);
-  }
-}
-if (modApplies({ matches: ["https://*.substack.com/*"], excludeMatches: ["https://*.substack.com/account*"] }, "https://x.substack.com/account/settings")) {
-  fail++;
-  console.log("FAIL excludeMatches");
-}
-console.log(fail ? `${fail} failed` : `all ${cases.length + 1} passed`);
-process.exitCode = fail ? 1 : 0;
+test.each(cases)("%s matches %s: %p", (pattern, url, want) => {
+  expect(m(pattern, url)).toBe(want);
+});
+
+test("excludeMatches", () => {
+  expect(modApplies({ matches: ["https://*.substack.com/*"], excludeMatches: ["https://*.substack.com/account*"] }, "https://x.substack.com/account/settings")).toBe(false);
+});
