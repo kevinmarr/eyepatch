@@ -147,6 +147,13 @@ export function connect() {
     let t = 600;
     later(t, () => event({ type: "session_update", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking what's on the page before changing it." } } }));
     t += 1500;
+    if (/think/i.test(text))
+      for (const thinking of ["Looking for the promoted label.", "It's in a span inside each post's header.", "Hiding the whole post, not just the label."]) {
+        later(t, () => event({ type: "session_update", update: { sessionUpdate: "tool_call", toolCallId: "x" + t, title: "mcp__eyepatch__query_selector_all", kind: "other", status: "in_progress" } }));
+        later(t + 600, () => event({ type: "session_update", update: { sessionUpdate: "tool_call_update", toolCallId: "x" + t, status: "completed" } }));
+        later(t + 800, () => event({ type: "session_update", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: thinking } } }));
+        t += 1800;
+      }
     for (const [id, title, kind] of [["n1", "mcp__eyepatch__get_page_content", "other"], ["n2", "mcp__eyepatch__query_selector_all", "other"], ["n3", "Edit `substack-readable-toc.user.css`", "edit"], ["n4", "Edit `substack-toc-highlight.user.js`", "edit"], ["n5", "mcp__eyepatch__reload_tab", "other"]]) {
       later(t, () => event({ type: "session_update", update: { sessionUpdate: "tool_call", toolCallId: id + t, title, kind, status: "in_progress" } }));
       t += 1200;

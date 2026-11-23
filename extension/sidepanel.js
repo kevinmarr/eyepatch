@@ -758,7 +758,7 @@ function syncModLinks(root = thread) {
 let turn = null; // { start, statusEl }
 let text = null; // { el, text } agent text being streamed
 let thought = null; // { row, detail, text, start }
-let run = null; // { el, tools: [] } current run of tool calls
+let run = null; // { el, tools: [] } current run of tool calls and thoughts
 let planEl = null;
 const tools = new Map(); // toolCallId -> tool
 const requests = new Map(); // permission / tab request id -> element
@@ -984,8 +984,10 @@ function duration(ms) {
 
 // ---------- thinking ----------
 
+// A thought is a step in the run of tool calls, so a run of thoughts folds away like tools do.
 function startThought() {
-  const wrap = append(el("div", "tools"));
+  const r = ensureRun();
+  const wrap = el("div", "tool-item");
   const row = el("button", "tool running", `${icon("brain", { size: 15 })}<span class="label">Thinking</span><span class="meta"></span>${icon("chevron-right", { size: 14, cls: "chevron" })}`);
   row.type = "button";
   row.setAttribute("aria-expanded", "false");
@@ -993,15 +995,23 @@ function startThought() {
   detail.hidden = true;
   wrap.append(row, detail);
   row.addEventListener("click", () => toggle(row, detail));
-  thought = { row, detail, text: "", start: lastAt || Date.now(), done: false };
+  thought = { kind: "thought", wrap, row, detail, text: "", start: lastAt || Date.now(), end: null, status: "pending", done: false, run: r };
+  r.tools.push(thought);
+  keepAtBottom(() => {
+    r.el.append(wrap);
+    layoutRun(r);
+  });
 }
 function finishThought() {
   const t = thought;
   thought = null;
   t.done = true;
+  t.status = "completed";
+  t.end = lastAt || Date.now();
   t.row.classList.remove("running");
-  t.row.querySelector(".label").textContent = `Thought for ${duration((lastAt || Date.now()) - t.start)}`;
+  t.row.querySelector(".label").textContent = `Thought for ${duration(t.end - t.start)}`;
   t.row.querySelector(".meta").textContent = "";
+  keepAtBottom(() => layoutRun(t.run));
 }
 
 function toggle(row, detail) {
@@ -1014,7 +1024,7 @@ function toggle(row, detail) {
 
 const LIVE_SHOWN = 3; // finished rows kept visible while a run is live
 
-function addTool(data) {
+function ensureRun() {
   if (!run) {
     run = { el: append(el("div", "tools")), tools: [], start: lastAt || Date.now(), closed: false };
     run.fold = el("button", "tool", `${icon("list-checks", { size: 15 })}<span class="label"></span>${icon("chevron-right", { size: 14, cls: "chevron" })}`);
@@ -1029,6 +1039,11 @@ function addTool(data) {
       keepAtBottom(() => layoutRun(r));
     });
   }
+  return run;
+}
+
+function addTool(data) {
+  ensureRun();
   const t = { id: data.toolCallId, data: {}, status: "pending", start: lastAt || Date.now(), end: null, run };
   t.wrap = el("div", "tool-item");
   t.row = el("button", "tool");
@@ -1151,13 +1166,22 @@ function layoutRun(r) {
   const open = r.fold.getAttribute("aria-expanded") === "true";
   const label = r.fold.querySelector(".label");
   if (r.closed) {
+    const used = r.tools.filter((t) => t.kind !== "thought");
+    // A lone thought stays as it is.
+    if (r.tools.length === 1 && !used.length) {
+      r.fold.hidden = true;
+      r.tools[0].wrap.hidden = false;
+      return;
+    }
     r.fold.hidden = false;
-    const n = r.tools.length;
-    const failed = r.tools.filter((t) => t.status === "failed").length;
-    label.textContent = `Used ${n} tool${n === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`;
+    const n = used.length;
+    const failed = used.filter((t) => t.status === "failed").length;
+    const thinking = r.tools.reduce((sum, t) => sum + (t.kind === "thought" ? (t.end ?? t.start) - t.start : 0), 0);
+    r.fold.querySelector("svg").outerHTML = icon(n ? "list-checks" : "brain", { size: 15 });
+    label.textContent = n ? `Used ${n} tool${n === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}` : `Thought for ${duration(thinking)}`;
     let meta = r.fold.querySelector(".meta");
     if (!meta) r.fold.insertBefore((meta = el("span", "meta")), r.fold.querySelector(".chevron"));
-    meta.textContent = duration((r.end ?? Date.now()) - r.start);
+    meta.textContent = n ? duration((r.end ?? Date.now()) - r.start) : "";
     for (const t of r.tools) t.wrap.hidden = !open;
     return;
   }

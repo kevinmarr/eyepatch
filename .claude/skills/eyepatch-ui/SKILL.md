@@ -69,7 +69,9 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
   faintly below (`.tool-live`). While working, earlier rows fold into "N
   earlier steps". A finished run collapses to "Used 9 tools · 41s". Details
   open in place in `.tool-detail`; errors in `.tool-error`.
-- **Thinking:** a collapsed row like a tool ("Thought for 8s").
+- **Thinking:** a collapsed row like a tool ("Thought for 8s"), and a step
+  in the run of tool calls: when the reply starts, thoughts fold into
+  "Used 9 tools" with them (or one "Thought for 40s" if there were no tools).
 - **Turn status** (`.turn-status`), last line of the turn: while working, the
   current agent's logo breathing plus elapsed time ("0:14"); when done,
   "Worked for 1m 12s · 2:14 PM" (full date on hover).
