@@ -332,8 +332,6 @@ releases that don't change `BRIDGE_VERSION` leave Agent Bridge alone.
   without the demo files and the manifest's `key` (the store rejects it). It
   refuses if `BRIDGE_VERSION` has no GitHub release yet. For the first upload
   only, add `--key /path/to/key.pem` so the store keeps the extension ID.
-- `bun run store:images` renders the store icon, promo tile and placeholder
-  screenshots into `agent-bridge/dist/store-images/` (needs Playwright).
 
 ## Config (env vars)
 
