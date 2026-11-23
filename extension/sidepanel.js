@@ -51,6 +51,8 @@ function connectPort() {
       setState(msg.state);
     } else if (msg.type === "event") {
       render(msg.event);
+    } else if (msg.type === "queue_restore") {
+      restoreQueued(msg.items);
     } else if (msg.type === "picked") {
       onPicked(msg.element);
     } else if (msg.type === "history") {
@@ -116,9 +118,10 @@ function setState(s) {
   $("new").hidden = !hasAgent;
   document.body.classList.toggle("no-agent", c.connected && c.needsAgent);
 
-  $("send").hidden = c.busy;
   $("stop").hidden = !c.busy;
   $("send").disabled = !hasAgent || !c.ready || needsAuth(s);
+  renderSend();
+  renderQueue();
   input.disabled = c.connected && c.needsAgent;
   $("attach").hidden = !c.images;
   renderTarget();
@@ -194,17 +197,31 @@ function autosize() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, innerHeight * 0.4) + "px";
 }
-input.addEventListener("input", autosize);
+input.addEventListener("input", () => {
+  autosize();
+  renderSend();
+});
+
+const hasDraft = () => Boolean(input.value.trim() || attachments.length || picked.length);
+
+/** While the agent works, Send (which queues) shows beside Stop only once there's something to send. */
+function renderSend() {
+  $("send").hidden = Boolean(state?.bridge.busy) && !hasDraft();
+  $("stop").classList.toggle("quiet", Boolean(state?.bridge.busy) && hasDraft());
+  $("send").setAttribute("aria-label", state?.bridge.busy ? "Send when the agent finishes" : "Send");
+  $("send").title = $("send").getAttribute("aria-label");
+}
 
 function submit(text = input.value.trim()) {
   const images = state?.bridge.images ? attachments : [];
-  if ((!text && !images.length) || !state?.bridge.ready || state.bridge.busy || needsAuth(state)) return;
+  if ((!text && !images.length) || !state?.bridge.ready || needsAuth(state)) return;
   port.postMessage({ type: "prompt", text, images: images.length ? images : undefined, elements: picked.length ? picked : undefined });
   input.value = "";
   attachments = [];
   picked = [];
   renderAttachments();
   autosize();
+  renderSend();
 }
 $("composer").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -217,6 +234,53 @@ input.addEventListener("keydown", (e) => {
   }
 });
 $("stop").addEventListener("click", () => port.postMessage({ type: "cancel" }));
+
+// ---------- messages waiting for the agent to finish ----------
+
+// Queued messages sit at the end of the thread, above the working line, until they're sent.
+const queueEl = el("div", "queue");
+queueEl.setAttribute("aria-label", "Queued messages");
+
+function renderQueue() {
+  const q = state?.queue ?? [];
+  const html = q
+    .map((m) => {
+      const imgs = (m.images ?? []).filter((src) => /^data:image\/(jpeg|png);base64,/.test(src));
+      return (
+        `<div class="user-message queued" data-id="${esc(m.id)}">` +
+        (imgs.length ? `<div class="message-images">${imgs.map((src) => `<img src="${src}" alt="Attached image" />`).join("")}</div>` : "") +
+        (m.elements?.length ? `<div class="message-elements">${m.elements.map((l) => `<span class="pill">${icon("square-dashed-mouse-pointer", { size: 14 })}<span>${esc(l)}</span></span>`).join("")}</div>` : "") +
+        (m.text ? `<p class="bubble">${esc(m.text)}</p>` : "") +
+        `<button type="button" class="send-now" data-send-now>Send now</button>` +
+        `</div>`
+      );
+    })
+    .join("");
+  if (queueEl.dataset.html !== html) keepAtBottom(() => (queueEl.innerHTML = queueEl.dataset.html = html));
+  if (!q.length) return queueEl.remove();
+  if (!queueEl.isConnected) {
+    const status = turn?.statusEl;
+    keepAtBottom(() => (status?.isConnected ? thread.insertBefore(queueEl, status) : thread.appendChild(queueEl)));
+  }
+}
+queueEl.addEventListener("click", (e) => {
+  const id = e.target.closest("[data-send-now]")?.closest(".queued")?.dataset.id;
+  if (id) port.postMessage({ type: "queue_send_now", id });
+});
+
+/** Queued messages back in the message box: the agent was stopped. */
+function restoreQueued(items) {
+  input.value = [...items.map((m) => m.text), input.value.trim()].filter(Boolean).join("\n\n");
+  for (const m of items) {
+    for (const img of m.images ?? []) if (attachments.length < MAX_IMAGES) attachments.push(img);
+    for (const p of m.elements ?? []) if (!picked.some((x) => x.selector === p.selector)) picked.push(p);
+  }
+  renderAttachments();
+  autosize();
+  renderSend();
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
 $("new").addEventListener("click", () => port.postMessage({ type: "new_session" }));
 
 // ---------- images ----------
@@ -270,6 +334,7 @@ function renderAttachments() {
           `<button type="button" class="icon-btn remove-el" data-remove-el="${i}" aria-label="Remove ${esc(p.label)}">${icon("x", { size: 13 })}</button></span>`,
       )
       .join("");
+  renderSend();
 }
 $("attachments").addEventListener("click", (e) => {
   const b = e.target.closest("[data-remove], [data-remove-el]");
@@ -701,6 +766,7 @@ let lastAt = 0;
 
 function resetThread() {
   thread.innerHTML = "";
+  queueEl.dataset.html = "";
   turn = text = thought = run = planEl = null;
   tools.clear();
   requests.clear();
@@ -717,8 +783,8 @@ function append(el) {
     hasMessages = true;
     renderEmpty();
   }
-  const status = turn?.statusEl;
-  if (status?.isConnected) thread.insertBefore(el, status);
+  const after = queueEl.isConnected ? queueEl : turn?.statusEl;
+  if (after?.isConnected) thread.insertBefore(el, after);
   else thread.appendChild(el);
   if (follow) thread.scrollTop = thread.scrollHeight;
   return el;

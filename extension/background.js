@@ -19,6 +19,8 @@ let bridgeProblem = null; // why it isn't connected: "missing", "dev_down", or w
 let agents = null; // agent catalog and install progress, from Agent Bridge
 const auths = new Map(); // agent id -> sign-in state
 const chats = new Map(); // tab id -> { agentId, agent, ready, busy, model, ... }
+const queues = new Map(); // tab id -> messages sent while the agent worked: [{ id, text, images, elements }]
+const sendingQueued = new Set(); // tabs whose queued message went to Agent Bridge, until it starts or fails
 const transcripts = new Map(); // tab id -> chat events, replayed when its panel opens
 const urlAtMessage = new Map(); // tab id -> the tab's URL when its latest message was sent
 const tabRequests = new Map(); // id -> { tabId, event, finish }, for "switch to tab" cards
@@ -54,6 +56,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   gm.forgetTab(tabId);
   for (const [id, r] of tabRequests) if (r.tabId === tabId) r.finish({ accepted: false, reason: "the tab was closed" });
   chats.delete(tabId);
+  queues.delete(tabId);
+  sendingQueued.delete(tabId);
   transcripts.delete(tabId);
   urlAtMessage.delete(tabId);
   attention.delete(tabId);
@@ -160,8 +164,10 @@ async function onBridgeMessage(msg) {
   switch (msg.type) {
     case "chat":
       chats.set(msg.tabId, msg.chat);
+      if (msg.chat.busy) sendingQueued.delete(msg.tabId);
       updateBadge(msg.tabId);
-      return broadcastState(msg.tabId);
+      broadcastState(msg.tabId);
+      return sendQueued(msg.tabId);
     case "transcript":
       transcripts.set(msg.tabId, msg.events);
       for (const [id, r] of tabRequests) if (r.tabId === msg.tabId) transcripts.get(msg.tabId).push(r.event);
@@ -173,6 +179,7 @@ async function onBridgeMessage(msg) {
     case "permission_request":
     case "permission_resolved": {
       const { tabId, ...event } = msg;
+      if (msg.type === "error") sendingQueued.delete(tabId);
       return record(tabId, event);
     }
     case "tool_call":
@@ -208,6 +215,24 @@ function record(tabId, event) {
   attend(tabId, event).catch((e) => console.error("[eyepatch] attention:", e));
 }
 
+async function sendPrompt(tabId, { text, images, elements }) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  urlAtMessage.set(tabId, tab?.url ?? null);
+  send({ type: "prompt", tabId, text, images, elements, page: tab && { tabId, url: tab.url, title: tab.title } });
+}
+
+/** Once the agent is free, send the next message queued while it worked. */
+function sendQueued(tabId) {
+  const chat = chats.get(tabId);
+  const q = queues.get(tabId);
+  if (!q?.length || !chat?.ready || chat.busy || !connected || sendingQueued.has(tabId)) return;
+  const next = q.shift();
+  if (!q.length) queues.delete(tabId);
+  sendingQueued.add(tabId); // so another chat update before the turn starts can't send the next one too
+  broadcastState(tabId);
+  sendPrompt(tabId, next);
+}
+
 /** What a tab's side panel shows besides the chat itself. */
 function state(tabId) {
   const chat = chats.get(tabId);
@@ -232,6 +257,7 @@ function state(tabId) {
     mods: modList,
     menuCommands: gm.menusFor(tabId),
     sessionId: chat?.sessionId ?? null,
+    queue: (queues.get(tabId) ?? []).map((m) => ({ id: m.id, text: m.text, images: m.images?.map((i) => i.thumb), elements: m.elements?.map((e) => e.label) })),
   };
 }
 
@@ -291,16 +317,42 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (msg) => {
     switch (msg.type) {
       case "prompt": {
-        const tab = await chrome.tabs.get(tabId).catch(() => null);
-        urlAtMessage.set(tabId, tab?.url ?? null);
-        send({ type: "prompt", tabId, text: msg.text, images: msg.images, elements: msg.elements, page: tab && { tabId, url: tab.url, title: tab.title } });
+        const { text, images, elements } = msg;
+        if (!chats.get(tabId)?.busy) {
+          sendPrompt(tabId, { text, images, elements });
+          break;
+        }
+        // The agent is working: send it when the turn ends.
+        if (!queues.has(tabId)) queues.set(tabId, []);
+        queues.get(tabId).push({ id: crypto.randomUUID(), text, images, elements });
+        broadcastState(tabId);
         break;
       }
-      case "cancel":
+      case "queue_send_now": {
+        // Move it to the front and stop the agent; the turn's end sends it.
+        const q = queues.get(tabId) ?? [];
+        const i = q.findIndex((m) => m.id === msg.id);
+        if (i < 0) break;
+        q.unshift(...q.splice(i, 1));
+        broadcastState(tabId);
+        declineTabRequests("the user interrupted the agent", tabId);
+        send({ type: "cancel", tabId });
+        break;
+      }
+      case "cancel": {
+        // Stopping the agent also keeps it from carrying on with queued messages: they go back to the message box.
+        const q = queues.get(tabId);
+        queues.delete(tabId);
+        if (q?.length) {
+          port.postMessage({ type: "queue_restore", items: q });
+          broadcastState(tabId);
+        }
         declineTabRequests("the user stopped the agent", tabId);
         send({ type: "cancel", tabId });
         break;
+      }
       case "new_session":
+        queues.delete(tabId);
         declineTabRequests("the user started a new chat", tabId);
         send({ type: "new_session", tabId });
         break;

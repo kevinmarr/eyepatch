@@ -120,14 +120,27 @@ export function connect() {
   const listeners = [];
   const emit = (msg) => setTimeout(() => listeners.forEach((l) => l(structuredClone(msg))), 0);
   const event = (e) => emit({ type: "event", event: { at: Date.now(), ...e } });
+  const queue = [];
   const setBusy = (busy) => {
     state.bridge.busy = busy;
+    state.queue = queue.map((m) => ({ ...m, images: m.images?.map((i) => i.thumb), elements: m.elements?.map((e) => e.label) }));
     emit({ type: "state", state });
+    if (!busy && queue.length) setTimeout(() => respond(...Object.values(queue.shift())), 300);
+  };
+  const stop = () => {
+    timers.forEach(clearTimeout);
+    timers = [];
+    event({ type: "turn_end", stopReason: "cancelled" });
+    setBusy(false);
   };
   let timers = [];
   const later = (ms, fn) => timers.push(setTimeout(fn, ms));
 
   function respond(text, images, elements) {
+    if (state.bridge.busy) {
+      queue.push({ text, images, elements, id: String(Math.random()) });
+      return setBusy(true);
+    }
     event({ type: "user_message", text, ...(images?.length ? { images: images.map((i) => i.thumb) } : {}), ...(elements?.length ? { elements } : {}) });
     setBusy(true);
     const words = /slow/i.test(text);
@@ -168,10 +181,13 @@ export function connect() {
         case "pick_cancel":
           return;
         case "cancel":
-          timers.forEach(clearTimeout);
-          timers = [];
-          event({ type: "turn_end", stopReason: "cancelled" });
-          return setBusy(false);
+          if (queue.length) emit({ type: "queue_restore", items: queue.splice(0) });
+          return stop();
+        case "queue_send_now": {
+          const i = queue.findIndex((m) => m.id === msg.id);
+          queue.unshift(...queue.splice(i, 1));
+          return stop();
+        }
         case "new_session":
           timers.forEach(clearTimeout);
           state.bridge.busy = false;

@@ -88,7 +88,12 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
 - **Message box** (`.composer`): textarea (Enter sends, Shift+Enter newline),
   then a bar: page pill (`.pill`, globe icon, about 24 characters then "…",
   page title on hover), spacer, model picker (`.model-btn`), and `.send`.
-  While the agent works, Send becomes Stop (`.send` with `.stop-square`).
+  While the agent works, Send becomes Stop (`.send` with `.stop-square`);
+  once there's a draft, Send comes back beside a gray Stop (`.send.quiet`)
+  and queues the message. Queued messages wait at the end of the thread,
+  above the working line, as italic muted bubbles (`.user-message.queued`)
+  with a quiet "Send now" (`.send-now`) that interrupts the agent. They go
+  one per turn; Stop puts them back in the box.
 - **Empty chat** (`.empty`): the mark (48 px) and "What do you want to
   modify?" centered above the message box; idea `.chip`s (with icons) sit just
   above the box.
