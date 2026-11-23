@@ -252,7 +252,9 @@ export class Chats {
         // The user may have signed in outside Eyepatch; a fresh agent
         // process re-reads its credentials and reports status again.
         const agent = this.process(msg.agentId);
-        if (agent && !this.busyOn(agent.id)) void agent.restart();
+        if (!agent) break;
+        agent.auth.beginCheck();
+        this.restartWhenIdle(agent.id);
         break;
       }
     }
@@ -452,6 +454,7 @@ export class Chats {
       agent = new AgentProcess(id, {
         agents: this.catalog,
         send: (msg) => this.extension.send(msg),
+        restartWhenIdle: (a) => this.restartWhenIdle(a.id),
         onReady: (a) => {
           for (const c of this.chatsOn(a.id)) {
             this.sendChat(c);

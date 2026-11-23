@@ -40,7 +40,7 @@ const full = {
       signIn: { methodId: "google", name: "Google account", output: "$ gemini auth login\nCode Assist login required.\nOpen this URL in your browser to authenticate:\nhttps://accounts.google.com/o/oauth2/v2/auth?client_id=681255809395&scope=openid\n\nEnter the authorization code:" },
     },
     cursor: { agent: "Cursor", state: "unauthenticated", accounts: [], methods: [{ id: "cursor", name: "Cursor account" }], error: "the link expired" },
-    opencode: { agent: "OpenCode", state: "authenticated", accounts: [{ label: "OpenRouter API key" }], methods: [] },
+    opencode: { agent: "OpenCode", state: "authenticated", accounts: [{ label: "OpenRouter API key" }], methods: [], restartPending: true },
   },
   mods: [
     { id: "substack-readable-toc.user.css", sites: ["substack.com"], name: "Substack: legible table of contents", description: "Moves the contents into the margin and highlights the current section", enabled: true, matches: ["*://*.substack.com/*"] },

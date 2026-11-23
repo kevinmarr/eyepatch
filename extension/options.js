@@ -232,6 +232,8 @@ function agentRow(a, auth, agents) {
   let sub = "";
   if (auth?.signIn) sub = `<span class="sub">Authenticating</span>`;
   else if (picking === a.id) sub = `<span class="sub">Choose how to authenticate</span>`;
+  else if (auth?.restartPending) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Restarting after the current reply…</span>`;
+  else if (auth?.checking) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Checking…</span>`;
   else if (failed) sub = `<span class="sub danger">Authentication failed: ${esc(auth.error)}</span>`;
   else if (unauthenticated) sub = `<span class="sub danger">Not authenticated</span>`;
   else if (updating) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Updating…</span>`;
@@ -241,6 +243,8 @@ function agentRow(a, auth, agents) {
   if (inFlow) {
     actions = `<button type="button" class="icon-btn lg" data-do="cancel" aria-label="Cancel authentication for ${esc(a.name)}" title="Cancel">${icon("x")}</button>`;
   } else {
+    // Authenticated somewhere else (e.g. in a terminal): ask the agent again.
+    if (unauthenticated && !auth.checking) actions += `<button type="button" class="btn quiet" data-do="recheck">Check again</button>`;
     if (failed && auth.methods.length) actions += `<button type="button" class="btn primary" data-do="auth">Try again</button>`;
     else if (unauthenticated && auth.methods.length) actions += `<button type="button" class="btn primary" data-do="auth">Authenticate</button>`;
     const items = [];
@@ -299,6 +303,7 @@ $("agents").addEventListener("click", (e) => {
   e.stopPropagation();
   if (what === "menu") menuFor = menuFor === a.id ? null : a.id;
   else if (what === "auth") return startAuth(a, auth);
+  else if (what === "recheck") post({ type: "auth_recheck", agentId: a.id });
   else if (what === "cancel") {
     if (auth?.signIn) post({ type: "auth_cancel", agentId: a.id });
     picking = null;
