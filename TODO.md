@@ -40,20 +40,14 @@ Also needed:
 Only tested with the fake extension (`npm run fake-extension`), a mock-up of
 the side panel, or not at all:
 
-- The Options page in real Chrome (only previewed with made-up data): opening
-  on install, installing and removing agents, a complete Sign in again with
-  Claude Agent and Codex, and the side panel's Sign in button opening it at
-  the right agent. Auto-update with Claude Agent (only tested with Codex).
-- The banner hiding by itself after turning on Allow User Scripts.
-- Agent Bridge on macOS and Windows (only run on Linux since moving to Bun
-  and native messaging): registration (JSON files, registry keys on Windows),
-  zip handling, musl, the browser tools' socket and the dev socket (named
-  pipes on Windows), and the dev shim's `.cmd` launcher.
+- Agent Bridge on Windows: registry keys, zip handling, musl, the browser 
+  tools' socket and the dev socket (named pipes on Windows), and the dev 
+  shim's `.cmd` launcher.
 - npm agents on Bun beyond starting a chat: the npm agents we offer were
   checked up to `session/new` (most stop at "authenticate first"), not
   through a real conversation. Claude Agent on Windows comes from npm too.
-- Browser tools with agents other than Claude Agent and Codex (only those two
-  were tried), including whether screenshots reach the model.
+- Browser tools with agents other than Claude Agent, Cursor, and Codex (only 
+  those three were tried), including whether screenshots reach the model.
 
 ## 3. Agents
 
