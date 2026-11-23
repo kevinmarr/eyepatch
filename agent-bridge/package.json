@@ -17,7 +17,8 @@
     "test": "bun test",
     "fake-extension": "bun scripts/fake-extension.ts",
     "test:e2e": "bun scripts/test-e2e.mjs",
-    "test:gm": "bun scripts/gm/test-gm.mjs"
+    "test:gm": "bun scripts/gm/test-gm.mjs",
+    "test:update": "bun scripts/test-update.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^2.7.0",

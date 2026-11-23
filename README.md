@@ -39,8 +39,10 @@ messaging), and stops it when Chrome quits. Nothing listens on a port.
    checks it against the release's checksums, puts it in
    `~/Library/Application Support/Eyepatch` (macOS), `~/.local/share/eyepatch`
    (Linux) or `%LOCALAPPDATA%\Eyepatch` (Windows), and registers it with every
-   Chromium-based browser. Run it again to update; Settings says when
-   Eyepatch needs a newer Agent Bridge.
+   Chromium-based browser. The command in Settings installs the exact version
+   that Eyepatch talks to (`EYEPATCH_VERSION=…`); without it you get the latest.
+   After that, Eyepatch updates Agent Bridge itself (see
+   [Updates](#updates)).
 3. Settings then links to **Allow User Scripts** (mods need it) and installs
    a coding agent.
 4. Click the toolbar icon to open the side panel and ask for a change.
@@ -247,7 +249,9 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   `python3 -m http.server -d extension`) and open `sidepanel.html?demo` for a
   canned chat with every Markdown element, tool calls and a permission request
   (send a message to watch a reply stream in; include "slow" to stream word by
-  word), `options.html?demo` (or `?demo=setup`) for Settings, and
+  word), `options.html?demo` (or `?demo=setup`, `?demo=updating`,
+  `?demo=update_failed`, `?demo=extension_outdated`, plus `&os=win`) for
+  Settings, and
   `design.html` for every component. The design rules are in
   `.claude/skills/eyepatch-ui`.
 - **Without Chrome:** `bun run fake-extension "make the h1 red"` starts an
@@ -264,12 +268,44 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   compares every result with `scripts/gm/reference.json`, recorded from
   Violentmonkey (`bun run test:gm --reference <unpacked Violentmonkey MV3>`
   records it again). Differences on purpose are in
-  `scripts/gm/expected-differences.json`. Both need Playwright installed.
+  `scripts/gm/expected-differences.json`. `bun run test:update` builds an
+  older, the current and a newer Agent Bridge, serves the current one as a
+  fake release (`EYEPATCH_RELEASES_URL`), and checks in Chromium that the
+  older one updates itself and the newer one is refused. All three need
+  Playwright installed.
+
+## Updates
+
+The extension updates from the Chrome Web Store. It talks to exactly one
+Agent Bridge version, `BRIDGE_VERSION` in `extension/background.js`, so the
+two never need to understand each other's older or newer messages. Agent
+Bridge's first message says its version (that message never changes), and the
+extension checks it before sending or reading anything else:
+
+- **Older:** the extension asks Agent Bridge to update itself to exactly
+  `BRIDGE_VERSION`. It downloads that GitHub release, checks it against the
+  release's `SHA256SUMS`, on macOS checks it's signed by the same Apple team
+  as itself, checks it reports that version, and replaces its own executable.
+  The extension then restarts it.
+- **Same:** carry on.
+- **Newer** (another browser's newer Eyepatch updated it): the extension asks
+  the Web Store for its own update and reloads into it. If there isn't one
+  yet, chat stops working and Settings and the side panel say so; mods that
+  were already installed keep running. It tries again later.
+
+Agent Bridge running from source is always accepted. Since all browsers share
+one Agent Bridge, someone with Eyepatch in two browsers may see the newer case
+for a moment after one of them updates.
+
+Chrome doesn't apply an extension update while the service worker is busy,
+and the port to Agent Bridge keeps it busy, so the extension reloads into an
+update itself once no side panel is open and no agent is working.
 
 ## Releasing
 
-Agent Bridge releases are built by `.github/workflows/release.yml`. Bump
-`version` in `agent-bridge/package.json`, commit, then push a matching tag:
+Agent Bridge releases are built by `.github/workflows/release.yml`. To release
+one, bump `version` in `agent-bridge/package.json`, commit, then push a
+matching tag:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
@@ -277,10 +313,12 @@ git tag v0.2.0 && git push origin v0.2.0
 
 It builds every platform, signs and notarizes the macOS builds (with the
 secrets the workflow lists), and publishes a GitHub release with
-`SHA256SUMS`, which the install scripts download. Running the workflow by hand
-only builds. When the extension starts relying on something new in Agent
-Bridge, raise `MIN_BRIDGE_VERSION` in `extension/background.js` so Settings
-asks people to update.
+`SHA256SUMS`. Running the workflow by hand only builds.
+
+An extension release that needs the new Agent Bridge sets `BRIDGE_VERSION` to
+it. **Publish the Agent Bridge release before uploading that extension
+version**, or its users' updates will fail until it's there. Extension
+releases that don't change `BRIDGE_VERSION` leave Agent Bridge alone.
 
 ## Config (env vars)
 

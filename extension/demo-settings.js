@@ -1,7 +1,8 @@
 // Canned Settings states for checking the page without Chrome or Agent Bridge.
 // options.html?demo shows every agent state; ?demo=setup shows first run,
-// ?demo=partial a checklist with one step left, ?demo=outdated an Agent Bridge
-// that needs updating. Add &os=win (or linux, cros) for other install commands.
+// ?demo=partial a checklist with one step left; ?demo=updating, update_failed,
+// too_old or extension_outdated for Agent Bridge versions that don't match.
+// Add &os=win (or linux, cros) for other install commands.
 
 const variant = new URLSearchParams(location.search).get("demo");
 
@@ -53,13 +54,17 @@ const full = {
   ],
 };
 
-const setup = { connected: false, userScripts: false, agents: null, auths: {}, mods: [] };
-const outdated = { connected: true, bridgeOutdated: true, bridgeVersion: "0.1.0", minBridgeVersion: "0.2.0", userScripts: true, agents: { list }, auths: {}, mods: [] };
+const setup = { connected: false, bridgeWanted: "0.2.0", userScripts: false, agents: null, auths: {}, mods: [] };
+const mismatch = (bridgeProblem, more = {}) => ({ connected: false, bridgeProblem, bridgeWanted: "0.2.0", userScripts: true, agents: null, auths: {}, mods: [], ...more });
+const updating = mismatch("updating", { bridgeVersion: "0.1.0" });
+const update_failed = mismatch("update_failed", { bridgeVersion: "0.1.0", bridgeDetail: "Couldn’t download agent-bridge-darwin-arm64.tar.gz (HTTP 404)" });
+const too_old = mismatch("too_old");
+const extension_outdated = mismatch("extension_outdated", { bridgeVersion: "0.3.0" });
 const partial = { connected: true, userScripts: true, agents: { list: list.map((a) => ({ ...a, installedVersion: null })) }, auths: {}, mods: [] };
 
 export function connect() {
   const listeners = [];
-  const state = structuredClone({ setup, partial, outdated }[variant] ?? full);
+  const state = structuredClone({ setup, partial, updating, update_failed, too_old, extension_outdated }[variant] ?? full);
   const emit = () => setTimeout(() => listeners.forEach((l) => l({ type: "state", state: structuredClone(state) })), 0);
   return {
     onMessage: {

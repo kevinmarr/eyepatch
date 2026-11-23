@@ -23,7 +23,12 @@ Also needed:
   Windows builds are unsigned (SmartScreen); `irm | iex` doesn't mark them
   either.
 - **First release:** push `v0.1.0` and run the install command on a Mac and
-  a Linux machine that never had the dev setup.
+  a Linux machine that never had the dev setup. Then the first real update:
+  release `v0.1.1`, point `BRIDGE_VERSION` at it in an unpacked copy, and
+  watch Eyepatch update Agent Bridge (`bun run test:update` does this with a
+  fake release, on Linux only so far).
+- **Release check:** the store zip script should refuse to package an
+  extension whose `BRIDGE_VERSION` has no GitHub release yet.
 - **Shorter install URL** (a domain): the raw.githubusercontent.com command
   doesn't fit in the Setup step's box.
 

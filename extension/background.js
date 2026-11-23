@@ -12,14 +12,22 @@ import { cssCode, removeCssCode, reportCode, scriptsFor, usesStorage, worldIdOf 
 const BRIDGE_HOST = "eyepatch.agent_bridge";
 const MAX_TRANSCRIPT = 2000;
 const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model API anyway
-// The oldest Agent Bridge this extension works with. Raise it when the
-// extension starts relying on something a newer Agent Bridge adds.
-const MIN_BRIDGE_VERSION = "0.1.0";
+// The Agent Bridge release this extension talks to, and only that one. An
+// older one is told to update itself to it; a newer one (another browser's
+// newer Eyepatch updated it) means this extension needs updating. Publish the
+// Agent Bridge release before the extension version that asks for it.
+const BRIDGE_VERSION = "0.1.0";
 
 let bridge = null; // the native messaging port
 let connected = false; // Agent Bridge answered on `bridge`
-let bridgeProblem = null; // why it isn't connected: "missing", "dev_down", or what Chrome said
-let bridgeVersion = null; // what Agent Bridge reported (null before it says, or if it's too old to say)
+// Why Agent Bridge isn't connected: "missing", "dev_down", "too_old" (can't
+// update itself), "updating", "update_failed", "updating_extension",
+// "extension_outdated", or what Chrome said.
+let bridgeProblem = null;
+let bridgeDetail = null; // the error, for "update_failed"
+let bridgeVersion = null; // what Agent Bridge reported
+let holdUntil = 0; // after refusing an Agent Bridge, don't start it again on our own before this
+let updatedTo = null; // the version we last told Agent Bridge to update to
 let agents = null; // agent catalog and install progress, from Agent Bridge
 const auths = new Map(); // agent id -> sign-in state
 const chats = new Map(); // tab id -> { agentId, agent, ready, busy, model, ... }
@@ -89,11 +97,12 @@ let retry = null;
  * reaches `bun run dev`) and stops it when this port closes. An open port also
  * keeps this service worker alive, so agents keep working with no panel open.
  */
-function connect() {
-  if (bridge) return;
+function connect({ force = false } = {}) {
+  if (bridge || (!force && Date.now() < holdUntil)) return;
   clearTimeout(retry);
   const port = chrome.runtime.connectNative(BRIDGE_HOST);
   bridge = port;
+  let checked = false; // Agent Bridge said it's the version we talk to
   const chunks = new Map(); // id -> parts of a message too big for one (see agent-bridge/src/native-messaging.ts)
   port.onMessage.addListener((msg) => {
     if (bridge !== port) return;
@@ -108,12 +117,7 @@ function connect() {
       bridgeProblem = "dev_down";
       return broadcastState();
     }
-    if (msg.type === "bridge_info") bridgeVersion = msg.version;
-    if (!connected) {
-      connected = true;
-      bridgeProblem = null;
-      broadcastState();
-    }
+    if (!checked) return checkBridge(port, msg, () => (checked = true));
     onBridgeMessage(msg).catch((e) => console.error("[eyepatch]", e));
   });
   port.onDisconnect.addListener(() => {
@@ -127,7 +131,40 @@ function connect() {
     // Retry soon while someone's looking; otherwise the alarm retries.
     if (panels.size || optionsPages.size) retry = setTimeout(connect, 2000);
   });
-  // Messages queue until Agent Bridge has started.
+}
+
+/**
+ * Agent Bridge's first message says its version, and nothing else is read or
+ * sent until it's the one this extension talks to (BRIDGE_VERSION), so the
+ * two never need to understand each other's older or newer messages. Running
+ * from source is always accepted.
+ */
+function checkBridge(port, msg, accept) {
+  if (msg.type === "bridge_info") {
+    bridgeVersion = msg.version;
+    if (msg.source || msg.version === BRIDGE_VERSION) return start(accept);
+    if (!olderThan(msg.version, BRIDGE_VERSION)) return updateExtension();
+    if (updatedTo === BRIDGE_VERSION) return refuse("update_failed", `Agent Bridge is still version ${msg.version} after updating`);
+    console.log(`[eyepatch] updating Agent Bridge ${msg.version} to ${BRIDGE_VERSION}`);
+    updatedTo = BRIDGE_VERSION;
+    bridgeProblem = "updating";
+    broadcastState();
+    return port.postMessage({ type: "bridge_update", version: BRIDGE_VERSION });
+  }
+  if (msg.type === "bridge_update_done") return restartBridge();
+  if (msg.type === "bridge_update_failed") return refuse("update_failed", msg.error);
+  // From before Agent Bridge said its version, so it can't update itself either.
+  if (bridgeVersion == null) refuse("too_old");
+}
+
+/** The right Agent Bridge: say hello and carry on where we were. */
+function start(accept) {
+  accept();
+  connected = true;
+  bridgeProblem = bridgeDetail = null;
+  holdUntil = 0;
+  updatedTo = null;
+  broadcastState();
   chrome.tabs.query({}).then(
     (tabs) => {
       send({ type: "hello", extensionVersion: chrome.runtime.getManifest().version, tabs: tabs.map((t) => t.id) });
@@ -137,6 +174,41 @@ function connect() {
     },
     () => {},
   );
+}
+
+/** Stop the Agent Bridge we won't talk to, and leave it stopped for a while. */
+function refuse(problem, detail = null) {
+  const port = bridge;
+  const version = bridgeVersion;
+  bridgeGone();
+  port?.disconnect();
+  bridgeProblem = problem;
+  bridgeDetail = detail;
+  bridgeVersion = version;
+  console.warn(`[eyepatch] not using Agent Bridge ${version ?? "(no version)"}: ${problem}${detail ? `: ${detail}` : ""}`);
+  // Try again later, or sooner while Settings is open (someone may be running the install command).
+  holdUntil = Date.now() + 30 * 60_000;
+  if (optionsPages.size) retry = setTimeout(() => connect({ force: true }), problem === "too_old" ? 5000 : 60_000);
+  broadcastState();
+}
+
+/**
+ * Agent Bridge is newer than this extension: another browser's Eyepatch got
+ * an update first. Get the same update from the Web Store and reload into it.
+ */
+async function updateExtension() {
+  bridgeProblem = "updating_extension";
+  broadcastState();
+  const ready = new Promise((resolve) => {
+    updateReady ? resolve() : chrome.runtime.onUpdateAvailable.addListener(() => resolve());
+    setTimeout(resolve, 60_000);
+  });
+  const { status } = await chrome.runtime.requestUpdateCheck().catch(() => ({ status: "error" }));
+  if (status === "update_available") {
+    await ready;
+    if (updateReady) return chrome.runtime.reload();
+  }
+  refuse("extension_outdated");
 }
 
 /** Forget everything that came from the Agent Bridge that just went away. */
@@ -151,14 +223,14 @@ function bridgeGone() {
   broadcastState();
 }
 
-/** Stop Agent Bridge and start it again, e.g. to pick up an update installed meanwhile. */
+/** Stop Agent Bridge and start it again, to run the version it just installed. */
 function restartBridge() {
   const port = bridge;
-  if (!port) return connect();
   bridgeGone(); // disconnect() doesn't fire our own onDisconnect
-  port.disconnect();
+  port?.disconnect();
+  bridgeProblem = "updating";
   // Give the old one a moment to exit before Chrome starts the new one.
-  retry = setTimeout(connect, 500);
+  retry = setTimeout(() => connect({ force: true }), 500);
 }
 
 /** Whether version a (like "0.10.2") is older than b. */
@@ -169,10 +241,22 @@ function olderThan(a, b) {
   return false;
 }
 
-/** Agent Bridge is running but older than this extension needs (or too old to say its version). */
-const bridgeOutdated = () => connected && (!bridgeVersion || olderThan(bridgeVersion, MIN_BRIDGE_VERSION));
+// Chrome doesn't apply an extension update while the service worker is busy,
+// and the open port to Agent Bridge keeps it busy. So apply it ourselves once
+// nothing would be interrupted: no side panel open and no agent working.
+let updateReady = false;
+chrome.runtime.onUpdateAvailable.addListener(({ version }) => {
+  console.log(`[eyepatch] update to ${version} ready`);
+  updateReady = true;
+  applyUpdateWhenIdle();
+});
+function applyUpdateWhenIdle() {
+  if (updateReady && !panels.size && ![...chats.values()].some((c) => c.busy)) chrome.runtime.reload();
+}
 
+/** Send to Agent Bridge, once it's the version we talk to (start() catches it up). */
 function send(msg) {
+  if (!connected) return;
   try {
     bridge?.postMessage(msg);
   } catch {
@@ -199,6 +283,7 @@ async function onBridgeMessage(msg) {
       if (msg.chat.busy) sendingQueued.delete(msg.tabId);
       updateBadge(msg.tabId);
       broadcastState(msg.tabId);
+      if (!msg.chat.busy) applyUpdateWhenIdle();
       return sendQueued(msg.tabId);
     case "transcript":
       transcripts.set(msg.tabId, msg.events);
@@ -272,6 +357,8 @@ function state(tabId) {
     bridge: {
       connected,
       problem: bridgeProblem,
+      detail: bridgeDetail,
+      version: bridgeVersion,
       agentId: chat?.agentId ?? null,
       agent: chat?.agent ?? null,
       ready: Boolean(chat?.ready),
@@ -312,8 +399,8 @@ function optionsState() {
     connected,
     bridgeProblem,
     bridgeVersion,
-    bridgeOutdated: bridgeOutdated(),
-    minBridgeVersion: MIN_BRIDGE_VERSION,
+    bridgeDetail,
+    bridgeWanted: BRIDGE_VERSION,
     agents,
     auths: Object.fromEntries(auths),
     userScripts: userScriptsAvailable(),
@@ -324,7 +411,7 @@ function optionsState() {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "options") return;
   optionsPages.add(port);
-  connect();
+  connect({ force: true });
   port.postMessage({ type: "state", state: optionsState() });
   // Agent Bridge starts the installed agents so their sign-in status shows.
   if (optionsPages.size === 1) send({ type: "options_open" });
@@ -335,7 +422,6 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((msg) => {
     if (msg.type === "color_scheme") return setToolbarIcon(msg.dark);
     if (msg.type === "mod_delete") gm.forget(msg.id);
-    if (msg.type === "bridge_restart") return restartBridge();
     if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete", "mod_reveal", "mod_import"].includes(msg.type)) send(msg);
   });
 });
@@ -356,6 +442,7 @@ chrome.runtime.onConnect.addListener((port) => {
     panels.get(tabId)?.delete(port);
     if (!panels.get(tabId)?.size) panels.delete(tabId);
     panelVisible.delete(port);
+    applyUpdateWhenIdle();
   });
   port.onMessage.addListener(async (msg) => {
     switch (msg.type) {

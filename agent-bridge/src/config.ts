@@ -2,7 +2,9 @@ import os from "node:os";
 import path from "node:path";
 import pkg from "../package.json" with { type: "json" };
 
-export const VERSION: string = pkg.version;
+declare const BUILD_VERSION: string | undefined;
+/** package.json's version (a build can be stamped with another, for testing updates). */
+export const VERSION: string = typeof BUILD_VERSION === "string" ? BUILD_VERSION : pkg.version;
 
 export const HOME = process.env.EYEPATCH_HOME ?? path.join(os.homedir(), ".eyepatch");
 export const MODS_DIR = path.join(HOME, "mods");
@@ -16,6 +18,10 @@ export const HOST_NAME = "eyepatch.agent_bridge";
  * extension/manifest.json, so the unpacked copy and the store copy share it.
  */
 export const EXTENSION_ID = "ilbbppjdddgjalodmdcmgdigaakgblpe";
+
+declare const BUILD_TARGET: string | undefined;
+/** The platform a compiled build is for, like darwin-arm64 or linux-x64-musl (set by scripts/build.ts). */
+export const TARGET: string | null = typeof BUILD_TARGET === "string" ? BUILD_TARGET : null;
 
 /** Whether this is the compiled executable (as opposed to `bun src/main.ts`). */
 export const COMPILED = import.meta.dir.includes("$bunfs") || import.meta.dir.includes("~BUN");

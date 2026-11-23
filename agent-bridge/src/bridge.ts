@@ -4,6 +4,7 @@ import { EXTENSION_DIR } from "./config.ts";
 import { Extension } from "./extension.ts";
 import { deleteMod, ensureModsDir, importMod, loadMods, revealMod, setModEnabled, watchDir, watchMods } from "./mods.ts";
 import { ToolServer } from "./tools.ts";
+import { cleanUpAfterUpdate, selfUpdate } from "./update.ts";
 
 /**
  * Agent Bridge itself: agents, chats, browser tools and mods, talking to the
@@ -11,6 +12,7 @@ import { ToolServer } from "./tools.ts";
  */
 export async function startBridge({ dev }: { dev: boolean }) {
   await ensureModsDir();
+  void cleanUpAfterUpdate();
 
   const extension = new Extension();
   const agents = new AgentManager((msg) => extension.send(msg));
@@ -41,6 +43,16 @@ export async function startBridge({ dev }: { dev: boolean }) {
 
   extension.onConnect(() => pushMods());
   extension.on((msg) => {
+    // The extension wants another version: replace this executable, then it restarts us.
+    if (msg.type === "bridge_update") {
+      selfUpdate(msg.version).then(
+        () => extension.send({ type: "bridge_update_done", version: msg.version }),
+        (e: Error) => {
+          console.error("[update] failed:", e.message);
+          extension.send({ type: "bridge_update_failed", version: msg.version, error: e.message });
+        },
+      );
+    }
     const fail = (id: string) => (e: Error) => console.error(`[mods] ${id}:`, e.message);
     // User scripts were just allowed: register every mod and reload the tabs it applies to.
     if (msg.type === "sync_mods") void loadMods().then((mods) => pushMods(mods.map((m) => m.id)));

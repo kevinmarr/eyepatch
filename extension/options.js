@@ -72,11 +72,17 @@ function render(s) {
 
 // ---------- setup ----------
 
-// install.sh / install.ps1 download the latest Agent Bridge release and
-// register it; running them again updates it.
+// install.sh / install.ps1 download an Agent Bridge release and register it.
+// They install the exact version this extension talks to; after that,
+// Eyepatch updates Agent Bridge itself.
 const PLATFORM = DEMO ? (new URLSearchParams(location.search).get("os") ?? "mac") : (await chrome.runtime.getPlatformInfo()).os;
 const SCRIPTS = "https://raw.githubusercontent.com/kevinmarr/eyepatch/main";
-const INSTALL_COMMAND = { mac: `curl -fsSL ${SCRIPTS}/install.sh | sh`, linux: `curl -fsSL ${SCRIPTS}/install.sh | sh`, win: `irm ${SCRIPTS}/install.ps1 | iex` }[PLATFORM];
+const installCommand = (v) =>
+  ({
+    mac: `curl -fsSL ${SCRIPTS}/install.sh | EYEPATCH_VERSION=${v} sh`,
+    linux: `curl -fsSL ${SCRIPTS}/install.sh | EYEPATCH_VERSION=${v} sh`,
+    win: `$env:EYEPATCH_VERSION="${v}"; irm ${SCRIPTS}/install.ps1 | iex`,
+  })[PLATFORM];
 // Loaded unpacked (no store update URL): probably working on Eyepatch itself,
 // with Agent Bridge running from source (see the README's Dev loop).
 const UNPACKED = DEMO || !chrome.runtime.getManifest().update_url;
@@ -88,20 +94,29 @@ const commandBox = (command) =>
 
 /** How to install, update or start Agent Bridge, for the first setup step. */
 function bridgeStep(s) {
-  const waiting = `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}Waiting for Agent Bridge…</span>`;
-  if (s.bridgeProblem === "dev_down") return { todo: "Start Agent Bridge", body: commandBox(START_COMMAND) + waiting };
-  if (s.bridgeOutdated) {
-    return {
-      todo: "Update Agent Bridge",
-      body:
-        (INSTALL_COMMAND ? commandBox(INSTALL_COMMAND) : "") +
-        `<span class="muted">${s.bridgeVersion ? `Version ${esc(s.bridgeVersion)} is installed. ` : ""}Eyepatch needs ${esc(s.minBridgeVersion)} or later.</span>` +
-        `<div><button type="button" class="btn" data-action="bridge-restart">Restart Agent Bridge</button></div>`,
-    };
+  const spinner = (text) => `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}${text}</span>`;
+  const waiting = spinner("Waiting for Agent Bridge…");
+  const command = installCommand(s.bridgeWanted);
+  const install = command ? commandBox(command) : `<span class="muted">Agent Bridge runs on macOS, Windows and Linux.</span>`;
+  switch (s.bridgeProblem) {
+    case "dev_down":
+      return { todo: "Start Agent Bridge", body: commandBox(START_COMMAND) + waiting };
+    case "updating":
+      return { todo: "Update Agent Bridge", body: spinner(`Updating to ${esc(s.bridgeWanted)}…`) };
+    case "updating_extension":
+      return { todo: "Update Eyepatch", body: spinner("Updating…") };
+    case "extension_outdated":
+      return {
+        todo: "Update Eyepatch",
+        body: `<span class="error-text">Agent Bridge ${esc(s.bridgeVersion)} needs a newer Eyepatch, and no update is available yet. Mods keep running.</span>`,
+      };
+    case "too_old":
+      return { todo: "Update Agent Bridge", body: install + waiting };
+    case "update_failed":
+      return { todo: "Update Agent Bridge", body: `<span class="error-text">Couldn’t update to ${esc(s.bridgeWanted)}: ${esc(s.bridgeDetail)}</span>` + install + waiting };
   }
   // Anything else Chrome reported (e.g. it crashed on start) is worth showing.
   const problem = s.bridgeProblem && s.bridgeProblem !== "missing" ? `<span class="error-text">${esc(s.bridgeProblem)}</span>` : "";
-  const install = INSTALL_COMMAND ? commandBox(INSTALL_COMMAND) : `<span class="muted">Agent Bridge runs on macOS, Windows and Linux.</span>`;
   const dev = UNPACKED ? `<div class="from-source"><span class="muted">From source</span>${commandBox(DEV_INSTALL_COMMAND)}</div>` : "";
   return { todo: "Install Agent Bridge", body: install + dev + problem + waiting };
 }
@@ -109,7 +124,7 @@ function bridgeStep(s) {
 function renderSetup(s) {
   const hasAgent = Boolean(s.agents?.custom || s.agents?.list.some((a) => a.installedVersion));
   const steps = [
-    { done: s.connected && !s.bridgeOutdated, name: "Agent Bridge running", ...bridgeStep(s) },
+    { done: s.connected, name: "Agent Bridge running", ...bridgeStep(s) },
     { done: s.userScripts, name: "User scripts allowed", todo: "Allow user scripts" },
     { done: hasAgent, name: "Agent installed", todo: "Install an agent" },
   ];
@@ -141,7 +156,6 @@ document.addEventListener("click", async (e) => {
   const action = e.target.closest("[data-action]")?.dataset.action;
   if (action === "user-scripts") openTab(`chrome://extensions/?id=${DEMO ? "" : chrome.runtime.id}`);
   if (action === "add-agent") openAddDialog();
-  if (action === "bridge-restart") post({ type: "bridge_restart" });
   const copy = e.target.closest("[data-copy]");
   if (copy) {
     await navigator.clipboard.writeText(copy.dataset.copy).catch(() => {});
