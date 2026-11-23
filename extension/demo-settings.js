@@ -1,6 +1,7 @@
 // Canned Settings states for checking the page without Chrome or Agent Bridge.
 // options.html?demo shows every agent state; ?demo=setup shows first run,
-// ?demo=partial a checklist with one step left.
+// ?demo=partial a checklist with one step left, ?demo=outdated an Agent Bridge
+// that needs updating. Add &os=win (or linux, cros) for other install commands.
 
 const variant = new URLSearchParams(location.search).get("demo");
 
@@ -53,11 +54,12 @@ const full = {
 };
 
 const setup = { connected: false, userScripts: false, agents: null, auths: {}, mods: [] };
+const outdated = { connected: true, bridgeOutdated: true, bridgeVersion: "0.1.0", minBridgeVersion: "0.2.0", userScripts: true, agents: { list }, auths: {}, mods: [] };
 const partial = { connected: true, userScripts: true, agents: { list: list.map((a) => ({ ...a, installedVersion: null })) }, auths: {}, mods: [] };
 
 export function connect() {
   const listeners = [];
-  const state = structuredClone({ setup, partial }[variant] ?? full);
+  const state = structuredClone({ setup, partial, outdated }[variant] ?? full);
   const emit = () => setTimeout(() => listeners.forEach((l) => l({ type: "state", state: structuredClone(state) })), 0);
   return {
     onMessage: {

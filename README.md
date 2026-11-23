@@ -13,37 +13,70 @@ side panel ⇄ service worker ⇄ native messaging ⇄ Agent Bridge ⇄ ACP (std
             registers mods as user scripts ◀── watches ~/.eyepatch/mods
 ```
 
-## Setup
+## Install
 
 Chrome starts Agent Bridge itself when the extension needs it (native
-messaging), and stops it when Chrome quits. Nothing listens on a port. Until
-there's an installer, set it up from source with [Bun](https://bun.sh):
+messaging), and stops it when Chrome quits. Nothing listens on a port.
 
-1. Register Agent Bridge with your Chromium-based browsers, then run it in a
-   terminal:
+1. Install the extension. Until it's in the Chrome Web Store: download this
+   repo ([zip](https://github.com/kevinmarr/eyepatch/archive/refs/heads/main.zip)),
+   open `chrome://extensions`, turn on **Developer mode**, click **Load
+   unpacked** and pick the `extension/` folder.
+2. Chrome opens Eyepatch's Settings page, which doubles as setup. Its first
+   step is installing Agent Bridge with one command. On macOS or Linux:
 
    ```bash
-   cd agent-bridge && bun install && bun run register:dev
+   curl -fsSL https://raw.githubusercontent.com/kevinmarr/eyepatch/main/install.sh | sh
    ```
 
-   ```bash
-   bun run dev
+   On Windows, in PowerShell (not yet tested):
+
+   ```powershell
+   irm https://raw.githubusercontent.com/kevinmarr/eyepatch/main/install.ps1 | iex
    ```
 
-   `register:dev` (once) points the browsers at a small shim that connects to
-   the Agent Bridge `bun run dev` runs (see [Dev loop](#dev-loop)). To have
-   Chrome run a standalone build instead, `bun run build`, then run
-   `dist/<platform>/agent-bridge install`.
+   It downloads the latest [release](https://github.com/kevinmarr/eyepatch/releases),
+   checks it against the release's checksums, puts it in
+   `~/Library/Application Support/Eyepatch` (macOS), `~/.local/share/eyepatch`
+   (Linux) or `%LOCALAPPDATA%\Eyepatch` (Windows), and registers it with every
+   Chromium-based browser. Run it again to update; Settings says when
+   Eyepatch needs a newer Agent Bridge.
+3. Settings then links to **Allow User Scripts** (mods need it) and installs
+   a coding agent.
+4. Click the toolbar icon to open the side panel and ask for a change.
 
 Each Chrome profile (or browser) with Eyepatch runs its own Agent Bridge; they
 share `~/.eyepatch` (mods, chats and installed agents).
 
-2. Load the extension: open `chrome://extensions`, turn on **Developer mode**,
-   click **Load unpacked** and pick the `extension/` folder.
-3. Chrome opens Eyepatch's Settings page, which doubles as setup: it checks
-   that Agent Bridge is installed, links to **Allow User Scripts** (mods need
-   it), and installs a coding agent.
-4. Click the toolbar icon to open the side panel and ask for a change.
+### Uninstall
+
+Removing the extension leaves Agent Bridge behind. To remove it too, on macOS:
+
+```bash
+~/Library/Application\ Support/Eyepatch/agent-bridge uninstall && rm -rf ~/Library/Application\ Support/Eyepatch
+```
+
+On Linux the folder is `~/.local/share/eyepatch`; on Windows,
+`%LOCALAPPDATA%\Eyepatch`. Delete `~/.eyepatch` as well to remove your mods,
+chats and the agents Eyepatch installed.
+
+### From source
+
+With [Bun](https://bun.sh), register the dev host once, then run Agent Bridge
+in a terminal:
+
+```bash
+cd agent-bridge && bun install && bun run register:dev
+```
+
+```bash
+bun run dev
+```
+
+`register:dev` points the browsers at a small shim that connects to the Agent
+Bridge `bun run dev` runs (see [Dev loop](#dev-loop)). To have Chrome run a
+standalone build instead, `bun run build`, then run
+`dist/<platform>/agent-bridge install`. Load the extension unpacked as above.
 
 ## Tabs and chats
 
@@ -232,6 +265,22 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   Violentmonkey (`bun run test:gm --reference <unpacked Violentmonkey MV3>`
   records it again). Differences on purpose are in
   `scripts/gm/expected-differences.json`. Both need Playwright installed.
+
+## Releasing
+
+Agent Bridge releases are built by `.github/workflows/release.yml`. Bump
+`version` in `agent-bridge/package.json`, commit, then push a matching tag:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+It builds every platform, signs and notarizes the macOS builds (with the
+secrets the workflow lists), and publishes a GitHub release with
+`SHA256SUMS`, which the install scripts download. Running the workflow by hand
+only builds. When the extension starts relying on something new in Agent
+Bridge, raise `MIN_BRIDGE_VERSION` in `extension/background.js` so Settings
+asks people to update.
 
 ## Config (env vars)
 

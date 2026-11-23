@@ -12,10 +12,14 @@ import { cssCode, removeCssCode, reportCode, scriptsFor, usesStorage, worldIdOf 
 const BRIDGE_HOST = "eyepatch.agent_bridge";
 const MAX_TRANSCRIPT = 2000;
 const MAX_SCREENSHOT_EDGE = 1568; // larger images get downscaled by the model API anyway
+// The oldest Agent Bridge this extension works with. Raise it when the
+// extension starts relying on something a newer Agent Bridge adds.
+const MIN_BRIDGE_VERSION = "0.1.0";
 
 let bridge = null; // the native messaging port
 let connected = false; // Agent Bridge answered on `bridge`
 let bridgeProblem = null; // why it isn't connected: "missing", "dev_down", or what Chrome said
+let bridgeVersion = null; // what Agent Bridge reported (null before it says, or if it's too old to say)
 let agents = null; // agent catalog and install progress, from Agent Bridge
 const auths = new Map(); // agent id -> sign-in state
 const chats = new Map(); // tab id -> { agentId, agent, ready, busy, model, ... }
@@ -104,6 +108,7 @@ function connect() {
       bridgeProblem = "dev_down";
       return broadcastState();
     }
+    if (msg.type === "bridge_info") bridgeVersion = msg.version;
     if (!connected) {
       connected = true;
       bridgeProblem = null;
@@ -115,16 +120,10 @@ function connect() {
     // Reading lastError also keeps Chrome from logging it as an uncaught error.
     const error = chrome.runtime.lastError?.message ?? "";
     if (bridge !== port) return;
-    bridge = null;
     if (/not found/i.test(error)) bridgeProblem = "missing";
     else if (bridgeProblem !== "dev_down") bridgeProblem = error || "Agent Bridge stopped";
     if (connected) console.warn("[eyepatch] Agent Bridge disconnected:", error || "exited");
-    connected = false;
-    declineTabRequests("Agent Bridge disconnected");
-    agents = null;
-    auths.clear();
-    for (const c of chats.values()) Object.assign(c, { ready: false, busy: false });
-    broadcastState();
+    bridgeGone();
     // Retry soon while someone's looking; otherwise the alarm retries.
     if (panels.size || optionsPages.size) retry = setTimeout(connect, 2000);
   });
@@ -139,6 +138,39 @@ function connect() {
     () => {},
   );
 }
+
+/** Forget everything that came from the Agent Bridge that just went away. */
+function bridgeGone() {
+  bridge = null;
+  connected = false;
+  bridgeVersion = null;
+  declineTabRequests("Agent Bridge disconnected");
+  agents = null;
+  auths.clear();
+  for (const c of chats.values()) Object.assign(c, { ready: false, busy: false });
+  broadcastState();
+}
+
+/** Stop Agent Bridge and start it again, e.g. to pick up an update installed meanwhile. */
+function restartBridge() {
+  const port = bridge;
+  if (!port) return connect();
+  bridgeGone(); // disconnect() doesn't fire our own onDisconnect
+  port.disconnect();
+  // Give the old one a moment to exit before Chrome starts the new one.
+  retry = setTimeout(connect, 500);
+}
+
+/** Whether version a (like "0.10.2") is older than b. */
+function olderThan(a, b) {
+  const pa = a.split(/[.-]/).map(Number);
+  const pb = b.split(/[.-]/).map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
+  return false;
+}
+
+/** Agent Bridge is running but older than this extension needs (or too old to say its version). */
+const bridgeOutdated = () => connected && (!bridgeVersion || olderThan(bridgeVersion, MIN_BRIDGE_VERSION));
 
 function send(msg) {
   try {
@@ -276,7 +308,17 @@ function broadcastState(tabId) {
 
 /** What the Options page shows: setup steps and every installed agent's sign-in. */
 function optionsState() {
-  return { connected, bridgeProblem, agents, auths: Object.fromEntries(auths), userScripts: userScriptsAvailable(), mods: modList };
+  return {
+    connected,
+    bridgeProblem,
+    bridgeVersion,
+    bridgeOutdated: bridgeOutdated(),
+    minBridgeVersion: MIN_BRIDGE_VERSION,
+    agents,
+    auths: Object.fromEntries(auths),
+    userScripts: userScriptsAvailable(),
+    mods: modList,
+  };
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -293,6 +335,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((msg) => {
     if (msg.type === "color_scheme") return setToolbarIcon(msg.dark);
     if (msg.type === "mod_delete") gm.forget(msg.id);
+    if (msg.type === "bridge_restart") return restartBridge();
     if (["agent_install", "agent_remove", "agents_refresh", "auth_start", "auth_input", "auth_cancel", "auth_recheck", "mod_set_enabled", "mod_delete", "mod_reveal", "mod_import"].includes(msg.type)) send(msg);
   });
 });

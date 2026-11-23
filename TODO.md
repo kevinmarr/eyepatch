@@ -9,10 +9,6 @@ The Options page is the setup page: Chrome opens it on install, and it has a
 checklist (Agent Bridge running, Allow User Scripts, an agent installed), the
 installed agents with sign-in, and the agent catalog. Still missing:
 
-- **Install Agent Bridge** step: a "Download for macOS" button (detect the OS
-  with `chrome.runtime.getPlatformInfo()`) instead of today's `bun run
-  register:dev` command. The page already retries `connectNative` until it
-  connects, and tells "not installed" from "dev server not running".
 - **Check again** for an agent that says it's signed out after you signed in
   elsewhere (e.g. in a terminal): today Agent Bridge only re-asks when the
   agent restarts.
@@ -21,19 +17,15 @@ installed agents with sign-in, and the agent catalog. Still missing:
 
 Also needed:
 
-- **Installer** per OS: copy the `bun run build` executable somewhere stable
-  (e.g. `~/Library/Application Support/Eyepatch/`) and run its `install`
-  command, which registers it with every Chromium-based browser found.
-- **Builds in CI** for each platform (`bun run build --all` cross-compiles).
-  The executable is about 110 MB (it includes Bun's runtime).
-- **Code signing:** macOS blocks unsigned downloaded executables, so this needs
-  an Apple Developer ID and notarization. Windows has the same issue
-  (SmartScreen).
-- **Version check:** Agent Bridge and the extension report their versions;
-  show an update prompt when Agent Bridge is too old.
-- **Uninstall:** removing the extension leaves Agent Bridge behind.
-  `agent-bridge uninstall` removes the registrations; document deleting the
-  executable and `~/.eyepatch` too.
+- **Signing secrets:** the release workflow signs and notarizes the macOS
+  builds once the Apple secrets it lists are set; until then they're ad-hoc
+  signed (fine with the `curl | sh` installer, which doesn't quarantine).
+  Windows builds are unsigned (SmartScreen); `irm | iex` doesn't mark them
+  either.
+- **First release:** push `v0.1.0` and run the install command on a Mac and
+  a Linux machine that never had the dev setup.
+- **Shorter install URL** (a domain): the raw.githubusercontent.com command
+  doesn't fit in the Setup step's box.
 
 ## 2. Test in real Chrome
 

@@ -5,7 +5,7 @@ import { AgentProcess } from "./agent-process.ts";
 import type { AgentManager, SelectKind } from "./agents.ts";
 import { AUTH_REQUIRED } from "./auth.ts";
 import type { ToolServer } from "./tools.ts";
-import { HOME, MODS_DIR } from "./config.ts";
+import { HOME, MODS_DIR, VERSION } from "./config.ts";
 import type { Extension, FromExtension, PageInfo, PickedElement, PromptImage } from "./extension.ts";
 import { modApplies } from "./match.ts";
 import { isModFile } from "./modfile.ts";
@@ -182,6 +182,7 @@ export class Chats {
   private onMessage(msg: FromExtension) {
     switch (msg.type) {
       case "hello":
+        this.extension.send({ type: "bridge_info", version: VERSION, platform: process.platform, arch: process.arch });
         this.forgetClosedTabs(msg.tabs);
         this.catalog.sendView();
         for (const agent of this.agents.values()) agent.auth.send();
