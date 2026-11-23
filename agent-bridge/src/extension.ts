@@ -23,7 +23,6 @@ export type FromExtension =
   | { type: "mod_set_enabled"; id: string; enabled: boolean }
   | { type: "mod_delete"; id: string }
   | { type: "mod_reveal"; id: string }
-  | { type: "mod_export"; id: string }
   | { type: "mod_import"; requestId: string; fileName: string; content: string }
   | { type: "history_list"; tabId: number }
   | { type: "history_restore"; tabId: number; sessionId: string }

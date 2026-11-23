@@ -135,9 +135,11 @@ use stroke 1.75: 18 px for actions, 15 px in tool rows, 14 px inline.
   Installing shows "Downloading Claude Agent (84 MB of 199 MB)…" and a
   `.progress` bar; failures show the reason and "Try again".
 - **Mods:** grouped by site (`.group-title`, 16 px, globe icon) with
-  `.group-items` indented under the name. Each mod: name, one-line
-  description, `.switch.lg`, then icon buttons for export (`download`), show
-  in folder (`folder-open`) and delete (`trash-2`). Broken mods are listed
+  `.group-items` indented under the name; mods for several sites or every
+  site go last under "Other mods", each with a globe after its name that
+  lists its sites on hover or focus. Each mod: name, one-line description,
+  `.switch.lg`, then icon buttons for show in folder (`folder-open`) and
+  delete (`trash-2`). No export: mods are already files. Broken mods are listed
   first under a red "Not running" group with their error. An "Import a mod"
   `.add-row` ends the section.
 - **Install dialog** (opening a `.user.js`/`.user.css` URL): a `.dialog` with

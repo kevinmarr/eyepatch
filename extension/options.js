@@ -49,7 +49,6 @@ function connectPort() {
   port = DEMO ? demo.connect() : chrome.runtime.connect({ name: "options" });
   port.onMessage.addListener((msg) => {
     if (msg.type === "state") render(msg.state);
-    else if (msg.type === "mod_file") download(msg.id, msg.content);
     else if (msg.type === "mod_imported") imported(msg);
   });
   port.postMessage({ type: "color_scheme", dark: matchMedia("(prefers-color-scheme: dark)").matches });
@@ -451,7 +450,6 @@ function renderMods(s) {
               `<span class="sub${m.error ? " danger" : ""}" title="${esc([m.error ?? m.description, ...(m.warnings ?? []), m.id].filter(Boolean).join("\n"))}">${esc(m.error ?? m.description ?? m.id)}</span>` +
               `</div>` +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
-              `<button type="button" class="icon-btn lg" data-do="export" aria-label="Export ${esc(m.name)}" title="Export">${icon("download")}</button>` +
               `<button type="button" class="icon-btn lg" data-do="reveal" aria-label="Show ${esc(m.name)} in its folder" title="Show in folder">${icon("folder-open")}</button>` +
               `<button type="button" class="icon-btn lg" data-do="ask-delete" aria-label="Delete ${esc(m.name)}" title="Delete">${icon("trash-2")}</button></div>`,
         )
@@ -494,7 +492,6 @@ $("mods").addEventListener("click", (e) => {
     return post({ type: "mod_set_enabled", id, enabled });
   }
   if (what === "reveal") return post({ type: "mod_reveal", id });
-  if (what === "export") return post({ type: "mod_export", id });
   if (what === "ask-delete") confirming = `mod:${id}`;
   else if (what === "confirm-cancel") confirming = null;
   else if (what === "delete") {
@@ -509,14 +506,6 @@ $("mods").addEventListener("click", (e) => {
 // Tampermonkey, Violentmonkey and Stylus use, so they move both ways as is.
 
 /** Save a mod's file (exporting it). */
-function download(name, content) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
 let importSeq = 0;
 const importing = new Map(); // request id -> { name, done(result) }
 

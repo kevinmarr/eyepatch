@@ -2,7 +2,7 @@ import { AgentManager } from "./agents.ts";
 import { Chats } from "./chats.ts";
 import { EXTENSION_DIR } from "./config.ts";
 import { Extension } from "./extension.ts";
-import { deleteMod, ensureModsDir, importMod, loadMods, readModFile, revealMod, setModEnabled, watchDir, watchMods } from "./mods.ts";
+import { deleteMod, ensureModsDir, importMod, loadMods, revealMod, setModEnabled, watchDir, watchMods } from "./mods.ts";
 import { ToolServer } from "./tools.ts";
 
 /**
@@ -49,12 +49,6 @@ export async function startBridge({ dev }: { dev: boolean }) {
     if (msg.type === "mod_set_enabled") setModEnabled(msg.id, msg.enabled).then(() => pushMods([msg.id]), fail(msg.id));
     if (msg.type === "mod_delete") deleteMod(msg.id).catch(fail(msg.id));
     if (msg.type === "mod_reveal") revealMod(msg.id).catch(fail(msg.id));
-    if (msg.type === "mod_export") {
-      readModFile(msg.id).then(
-        (content) => extension.send({ type: "options_event", event: { type: "mod_file", id: msg.id, content } }),
-        fail(msg.id),
-      );
-    }
     if (msg.type === "mod_import") {
       importMod(msg.fileName, msg.content).then(
         (id) => extension.send({ type: "options_event", event: { type: "mod_imported", requestId: msg.requestId, id } }),

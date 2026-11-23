@@ -220,11 +220,6 @@ if (opts) {
 }
 
 if (opts) {
-  // Export downloads the file as is.
-  const dl = opts.waitForEvent("download");
-  await opts.locator('[data-mod="gm.user.js"] [data-do="export"]').click();
-  const file = await dl.then((d) => d.path().then((p) => [d.suggestedFilename(), fs.readFileSync(p, "utf8")])).catch((e) => [String(e), ""]);
-  check("export", file[0] === "gm.user.js" && file[1] === fs.readFileSync(path.join(MODS, "gm.user.js"), "utf8"), file[0]);
   // Import from files.
   fs.writeFileSync(path.join(HERE, "Some Style.user.css"), `/* ==UserStyle==\n@name Imported\n==/UserStyle== */\n@-moz-document domain("x.com") { a {} }`);
   fs.writeFileSync(path.join(HERE, "junk.js"), "alert(1)");

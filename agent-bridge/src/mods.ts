@@ -150,11 +150,6 @@ export async function deleteMod(id: string) {
   if (state.disabled.includes(id)) await writeState({ disabled: state.disabled.filter((d) => d !== id) });
 }
 
-/** A mod's file, for exporting. */
-export async function readModFile(id: string) {
-  return fsp.readFile(modPath(id), "utf8");
-}
-
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+|[-.]+$/g, "").slice(0, 80);
 

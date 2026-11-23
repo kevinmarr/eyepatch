@@ -150,8 +150,8 @@ The agent's working directory is `~/.eyepatch/mods`, and `CLAUDE.md`/`AGENTS.md`
 there describe the formats. Whether each mod is on is kept in
 `~/.eyepatch/mods-state.json`, not in the file.
 
-The Options page lists every mod by site, with an on/off switch, export,
-show-in-folder and delete (deleted mods move to `~/.eyepatch/trash/`), and
+The Options page lists every mod by site (mods for several sites or every
+site under **Other mods**), with an on/off switch, show-in-folder and delete (deleted mods move to `~/.eyepatch/trash/`), and
 **Import a mod** for `.user.js` and `.user.css` files. Opening a `.user.js` or
 `.user.css` URL, for example Greasy Fork's Install button, opens Settings and
 offers to install it. You can also drop files into the folder.
@@ -227,7 +227,7 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   in Playwright's Chromium, which starts a real Agent Bridge (registered as
   the test profile's native messaging host), and checks that mods run: styles,
   hot swap, userscripts and their GM functions, menu commands, install from a
-  URL, import and export. `bun run test:gm` runs `scripts/gm/suite.user.js` and
+  URL, and import. `bun run test:gm` runs `scripts/gm/suite.user.js` and
   compares every result with `scripts/gm/reference.json`, recorded from
   Violentmonkey (`bun run test:gm --reference <unpacked Violentmonkey MV3>`
   records it again). Differences on purpose are in
