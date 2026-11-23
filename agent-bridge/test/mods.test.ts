@@ -29,7 +29,7 @@ test("plain @match script", () => {
   assert.equal(m.world, "isolated");
   assert.equal(m.allFrames, false);
   assert.equal(m.runAt, "document_idle");
-  assert.equal(m.site, "github.com");
+  assert.deepEqual(m.sites, ["github.com"]);
 });
 
 test("no grants runs in the page, like Tampermonkey", () => {
@@ -101,7 +101,7 @@ test("@include globs and regexes become a filter", () => {
 test("@include * is every site", () => {
   const m = parseUserScript("a.user.js", userscript(`@include *`));
   assert.ok(modApplies(m, "https://anything.example/"));
-  assert.equal(m.site, "All sites");
+  assert.deepEqual(m.sites, []);
 });
 
 test("Tampermonkey-only patterns are fixed or filtered", () => {
@@ -139,12 +139,17 @@ test("@require, @resource, @connect and GM_info", () => {
   assert.match((m.info as { scriptMetaStr: string }).scriptMetaStr, /==UserScript==/);
 });
 
+test("a mod on several sites lists each once", () => {
+  const m = parseUserScript("a.user.js", userscript(`@match https://www.google.com/search*\n@match https://bing.com/*\n@match https://*.google.com/maps/*\n@include https://duckduckgo.com/*`));
+  assert.deepEqual(m.sites, ["google.com", "bing.com", "duckduckgo.com"]);
+});
+
 test("site names from regexes", () => {
-  const site = (inc: string) => parseUserScript("a.user.js", userscript(`@include ${inc}`)).site;
+  const site = (inc: string) => parseUserScript("a.user.js", userscript(`@include ${inc}`)).sites.join();
   assert.equal(site("/^https?://www\\.example\\.org/\\d+$/"), "example.org");
   assert.equal(site("/127\\.0\\.0\\.1:8123\\/page/"), "127.0.0.1");
   const css = parseUserCss("x.user.css", `/* ==UserStyle==\n@name X\n==/UserStyle== */\n@-moz-document regexp("http://127\\\\.0\\\\.0\\\\.1(:\\\\d+)?/.*") { a {} }`);
-  assert.equal(css.site, "127.0.0.1");
+  assert.deepEqual(css.sites, ["127.0.0.1"]);
 });
 
 // ---------- UserCSS ----------
@@ -175,7 +180,7 @@ test("@-moz-document sections", () => {
   assert.ok(modApplies(m, "https://example.com/12"));
   assert.ok(!modApplies(m, "https://example.com/12/x"));
   assert.ok(!modApplies(m, "https://gitlab.com/"));
-  assert.equal(m.site, "github.com");
+  assert.deepEqual(m.sites, ["github.com", "example.com"]);
   assert.equal(m.runAt, "document_start");
 });
 

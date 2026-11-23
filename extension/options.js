@@ -387,13 +387,31 @@ $("add-list").addEventListener("click", (e) => {
 
 // ---------- mods ----------
 
-/** The site a mod is for: as Agent Bridge worked it out, or from its first match pattern. */
-function siteOf(mod) {
-  if (mod.site) return mod.site;
-  const host = /^[^:]+:\/\/([^/]*)/.exec(mod.matches[0] ?? "")?.[1] ?? "";
-  const site = host.replace(/^\*\./, "").replace(/^www\./, "");
-  return !site || site === "*" ? "All sites" : site;
+const NOT_RUNNING = "Not running";
+const OTHER_MODS = "Other mods";
+
+/** The sites a mod runs on (empty: every site), as Agent Bridge worked them out. */
+const sitesOf = (mod) => mod.sites ?? [];
+
+/** The group a mod is listed under: its one site, or "Other mods" for every site or several. */
+function groupOf(mod) {
+  const sites = sitesOf(mod);
+  if (mod.error) return NOT_RUNNING;
+  return sites.length === 1 ? sites[0] : OTHER_MODS;
 }
+
+/** For a mod in "Other mods": an icon that shows where it runs on hover or focus. */
+function sitesIcon(sites) {
+  const label = sites.length ? `Runs on ${sites.join(", ")}` : "Runs on every site";
+  const list = sites.length ? sites.map((h) => `<span>${esc(h)}</span>`).join("") : `<span>Every site</span>`;
+  return (
+    `<span class="sites-icon" tabindex="0" role="img" aria-label="${esc(label)}">${icon("globe", { size: 14 })}` +
+    `<span class="tip" aria-hidden="true"><span class="tip-label">Runs on</span>${list}</span></span>`
+  );
+}
+
+/** "google.com, bing.com and 14 more". */
+const siteList = (sites, n = 2) => sites.slice(0, n).join(", ") + (sites.length > n ? ` and ${sites.length - n} more` : "");
 
 let modsKey = "";
 
@@ -409,15 +427,15 @@ function renderMods(s) {
   const key = JSON.stringify([mods, confirming, currentMod]);
   if (key === modsKey) return arrived && showCurrentMod();
   modsKey = key;
-  const NOT_RUNNING = "Not running";
   const bySite = new Map();
   for (const m of mods) {
-    const site = m.error ? NOT_RUNNING : siteOf(m);
-    if (!bySite.has(site)) bySite.set(site, []);
-    bySite.get(site).push(m);
+    const group = groupOf(m);
+    if (!bySite.has(group)) bySite.set(group, []);
+    bySite.get(group).push(m);
   }
-  // Broken mods first, then sites alphabetically.
-  const sites = [...bySite.keys()].sort((a, b) => (b === NOT_RUNNING) - (a === NOT_RUNNING) || a.localeCompare(b));
+  // Broken mods first, then sites alphabetically, then other mods.
+  const rank = (g) => (g === NOT_RUNNING ? 0 : g === OTHER_MODS ? 2 : 1);
+  const sites = [...bySite.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   $("mods").innerHTML = sites
     .map((site) => {
       const broken = site === NOT_RUNNING;
@@ -427,10 +445,11 @@ function renderMods(s) {
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((m) =>
           confirming === `mod:${m.id}`
-            ? `<div class="confirm" data-mod="${esc(m.id)}"><div class="main"><span class="name">Delete “${esc(m.name)}”?</span><span class="sub">It stops running on ${esc(siteOf(m))}.</span></div>` +
+            ? `<div class="confirm" data-mod="${esc(m.id)}"><div class="main"><span class="name">Delete “${esc(m.name)}”?</span><span class="sub">It stops running on ${sitesOf(m).length ? esc(siteList(sitesOf(m))) : "every site"}.</span></div>` +
               `<div class="actions"><button type="button" class="btn quiet" data-do="confirm-cancel">Cancel</button><button type="button" class="btn danger" data-do="delete">Delete</button></div></div>`
-            : `<div class="row" data-mod="${esc(m.id)}"${m.id === currentMod ? ` aria-current="true" tabindex="-1"` : ""}><div class="main"><span class="name">${esc(m.name)}</span>` +
-              `<span class="sub${m.error ? " danger" : ""}" title="${esc([m.error ?? m.description, ...(m.warnings ?? []), m.id].filter(Boolean).join("\n"))}">${esc(m.error ?? m.description ?? m.id)}</span></div>` +
+            : `<div class="row" data-mod="${esc(m.id)}"${m.id === currentMod ? ` aria-current="true" tabindex="-1"` : ""}><div class="main"><span class="name">${esc(m.name)}${site === OTHER_MODS ? sitesIcon(sitesOf(m)) : ""}</span>` +
+              `<span class="sub${m.error ? " danger" : ""}" title="${esc([m.error ?? m.description, ...(m.warnings ?? []), m.id].filter(Boolean).join("\n"))}">${esc(m.error ?? m.description ?? m.id)}</span>` +
+              `</div>` +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
               `<button type="button" class="icon-btn lg" data-do="export" aria-label="Export ${esc(m.name)}" title="Export">${icon("download")}</button>` +
               `<button type="button" class="icon-btn lg" data-do="reveal" aria-label="Show ${esc(m.name)} in its folder" title="Show in folder">${icon("folder-open")}</button>` +

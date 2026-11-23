@@ -21,8 +21,8 @@ export type Mod = {
   name: string;
   description?: string;
   version?: string;
-  /** For grouping in Settings: the site it's for, or "All sites". */
-  site: string;
+  /** For grouping in Settings: the sites it runs on, in the order its rules name them; empty for every site. */
+  sites: string[];
   enabled: boolean;
   /** Set when the mod can't run; it is not registered. */
   error?: string;
@@ -184,12 +184,12 @@ function registrationPatterns(rules: ModRule[]) {
   return [...out];
 }
 
-/** The site to group a mod under in Settings. */
-export function siteOf(rules: ModRule[]): string {
+/** The sites a mod runs on, for Settings; empty when it runs on every site. */
+export function sitesOf(rules: ModRule[]): string[] {
   const hosts = new Set<string>();
   for (const r of rules) {
     let host = "";
-    if (r.type === "all") return "All sites";
+    if (r.type === "all") return [];
     if (r.type === "domain") host = r.value;
     else if (r.type === "match") host = r.value === "<all_urls>" ? "*" : (/^[^:]+:\/\/([^/]*)/.exec(r.value)?.[1] ?? "");
     else if (r.type === "url" || r.type === "prefix") host = /^[^:]+:\/\/([^/?#]*)/.exec(r.value)?.[1] ?? "";
@@ -200,10 +200,11 @@ export function siteOf(rules: ModRule[]): string {
       host = m ? m[1] : "*";
     }
     host = host.toLowerCase().replace(/:\d+$/, "").replace(/^\*\./, "").replace(/^www\./, "");
-    if (!host || host.includes("*")) return "All sites";
+    if (!host || host.includes("*")) return [];
     hosts.add(host);
   }
-  return [...hosts][0] ?? "All sites";
+  // gist.github.com is part of github.com.
+  return [...hosts].filter((h) => ![...hosts].some((o) => h.endsWith(`.${o}`)));
 }
 
 const baseName = (id: string) => id.replace(/\.user\.(js|css)$/, "");
@@ -227,7 +228,7 @@ const PLAIN_GRANTS = new Set(["none", "unsafewindow", "window.close", "window.fo
 
 export function parseUserScript(id: string, src: string): Omit<Mod, "enabled"> {
   const base: Omit<Mod, "enabled"> = {
-    id, kind: "js", name: baseName(id), site: "All sites", matches: [], excludeMatches: [],
+    id, kind: "js", name: baseName(id), sites: [], matches: [], excludeMatches: [],
     runAt: "document_idle", world: "isolated", allFrames: false,
   };
   const meta = parseUserScriptMeta(src);
@@ -295,7 +296,7 @@ export function parseUserScript(id: string, src: string): Omit<Mod, "enabled"> {
     name,
     description: first(meta, "description")?.trim() || undefined,
     version: first(meta, "version")?.trim() || undefined,
-    site: siteOf(any),
+    sites: sitesOf(any),
     runAt,
     world,
     allFrames: !meta.entries.some(([k]) => k === "noframes"),
@@ -484,7 +485,7 @@ function varDeclaration(value: string): string | null {
 
 export function parseUserCss(id: string, src: string): Omit<Mod, "enabled"> {
   const base: Omit<Mod, "enabled"> = {
-    id, kind: "css", name: baseName(id), site: "All sites", matches: [], excludeMatches: [],
+    id, kind: "css", name: baseName(id), sites: [], matches: [], excludeMatches: [],
     runAt: "document_start", world: "isolated", allFrames: true,
   };
   const meta = parseUserCssMeta(src);
@@ -510,7 +511,7 @@ export function parseUserCss(id: string, src: string): Omit<Mod, "enabled"> {
 
   const mod: Omit<Mod, "enabled"> = {
     ...described,
-    site: siteOf(any),
+    sites: sitesOf(any),
     matches: registrationPatterns(any),
     excludeMatches: [],
     filter: { any, none: [] },

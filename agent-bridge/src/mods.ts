@@ -62,7 +62,7 @@ export async function loadMods({ assets = false } = {}): Promise<Mod[]> {
       try {
         mod = { ...parseModFile(id, await fsp.readFile(path.join(MODS_DIR, id), "utf8")), enabled: !disabled.includes(id) };
       } catch (e) {
-        return { id, kind: id.endsWith(CSS_EXT) ? "css" : "js", name: id, site: "All sites", enabled: false, matches: [], excludeMatches: [], runAt: "document_idle", world: "isolated", allFrames: false, error: (e as Error).message };
+        return { id, kind: id.endsWith(CSS_EXT) ? "css" : "js", name: id, sites: [], enabled: false, matches: [], excludeMatches: [], runAt: "document_idle", world: "isolated", allFrames: false, error: (e as Error).message };
       }
       if (assets && !mod.error && mod.enabled) await resolveAssets(mod);
       return mod;

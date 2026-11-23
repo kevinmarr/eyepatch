@@ -41,10 +41,13 @@ const full = {
     opencode: { agent: "OpenCode", state: "authenticated", accounts: [{ label: "OpenRouter API key" }], methods: [] },
   },
   mods: [
-    { id: "substack-readable-toc.user.css", site: "substack.com", name: "Substack: legible table of contents", description: "Moves the contents into the margin and highlights the current section", enabled: true, matches: ["*://*.substack.com/*"] },
-    { id: "substack-hide-subscribe.user.css", site: "substack.com", name: "Hide in-article subscribe prompts", description: "Removes the subscribe boxes between paragraphs", enabled: false, matches: ["*://*.substack.com/*"] },
-    { id: "kl-wine-searcher.user.js", site: "klwines.com", name: "K&L: Wine-Searcher links", description: "Adds a Wine-Searcher link after each bottle", enabled: true, matches: ["*://www.klwines.com/*"] },
-    { id: "github-collapse-sidebar.user.js", site: "github.com", name: "GitHub: collapse PR sidebar", description: "Hides the sidebar on pull requests until you hover", enabled: true, matches: ["https://github.com/*/pull/*"] },
+    { id: "substack-readable-toc.user.css", sites: ["substack.com"], name: "Substack: legible table of contents", description: "Moves the contents into the margin and highlights the current section", enabled: true, matches: ["*://*.substack.com/*"] },
+    { id: "substack-hide-subscribe.user.css", sites: ["substack.com"], name: "Hide in-article subscribe prompts", description: "Removes the subscribe boxes between paragraphs", enabled: false, matches: ["*://*.substack.com/*"] },
+    { id: "kl-wine-searcher.user.js", sites: ["klwines.com"], name: "K&L: Wine-Searcher links", description: "Adds a Wine-Searcher link after each bottle", enabled: true, matches: ["*://www.klwines.com/*"] },
+    { id: "dark-mode.user.css", sites: ["news.ycombinator.com", "wikipedia.org", "craigslist.org", "old.reddit.com", "lobste.rs"], name: "Dark mode", description: "Dark colors on sites that don't have their own", enabled: true, matches: ["*://news.ycombinator.com/*"] },
+    { id: "search-hide-ai.user.js", sites: ["google.com", "bing.com"], name: "Hide AI answers in search", description: "Removes the AI overview above results", enabled: true, matches: ["*://www.google.com/search*", "*://www.bing.com/search*"] },
+    { id: "readable-width.user.css", sites: [], name: "Readable line length", description: "Caps paragraphs at 70 characters wide", enabled: false, matches: ["*://*/*"] },
+    { id: "github-collapse-sidebar.user.js", sites: ["github.com"], name: "GitHub: collapse PR sidebar", description: "Hides the sidebar on pull requests until you hover", enabled: true, matches: ["https://github.com/*/pull/*"] },
     { id: "hn-hide-sidebar.user.js", name: "Hacker News: hide sidebar", error: "needs at least one @match or @include", enabled: true, matches: [] },
   ],
 };
