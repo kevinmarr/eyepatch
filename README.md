@@ -326,16 +326,14 @@ releases that don't change `BRIDGE_VERSION` leave Agent Bridge alone.
 
 ## Chrome Web Store
 
-`store/LISTING.md` has what goes in each field of the store's dashboard
-(description, permission justifications, privacy answers), next to the
-images. `PRIVACY.md` is the privacy policy the listing links to.
+`PRIVACY.md` is the privacy policy the store listing links to.
 
 - `bun run package:extension` zips `extension/` into `agent-bridge/dist/`
   without the demo files and the manifest's `key` (the store rejects it). It
   refuses if `BRIDGE_VERSION` has no GitHub release yet. For the first upload
   only, add `--key /path/to/key.pem` so the store keeps the extension ID.
 - `bun run store:images` renders the store icon, promo tile and placeholder
-  screenshots into `store/` (needs Playwright).
+  screenshots into `agent-bridge/dist/store-images/` (needs Playwright).
 
 ## Config (env vars)
 

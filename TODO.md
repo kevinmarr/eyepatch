@@ -63,10 +63,10 @@ the side panel, or not at all:
 
 ## 5. Chrome Web Store
 
-Listing text, privacy answers and images are in `store/`, the privacy policy
-in `PRIVACY.md`, and `bun run package:extension` makes the zip. Still:
+The privacy policy is `PRIVACY.md`, `bun run package:extension` makes the zip
+and `bun run store:images` the images. Still:
 
-- **Real screenshots:** the ones in `store/` are made from the demo pages.
+- **Real screenshots:** the ones `store:images` makes are from the demo pages.
   Better: the side panel over a real site, mid change, and the site after.
 - **First upload:** `bun run package:extension --key key.pem`, and check the
   ID the dashboard shows is `ilbbppjdddgjalodmdcmgdigaakgblpe` before

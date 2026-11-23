@@ -1,4 +1,4 @@
-// Chrome Web Store images, into store/: the 128 px store icon (96 px mark,
+// Chrome Web Store images, into agent-bridge/dist/store-images/: the 128 px store icon (96 px mark,
 // 16 px clear around it), a 440×280 promo tile, and 1280×800 screenshots made
 // from the demo pages (options.html?demo, sidepanel.html?demo).
 // Run with: bun run store:images (needs Playwright and its Chromium).
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const { chromium } = createRequire(import.meta.url)("playwright");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const EXT = path.join(ROOT, "extension");
-const OUT = path.join(ROOT, "store");
+const OUT = path.join(ROOT, "agent-bridge", "dist", "store-images");
 const MARK = fs.readFileSync(path.join(EXT, "icons", "eyepatch.svg"), "utf8");
 const FONTS = `@font-face { font-family: Geist; src: url(/ui/fonts/Geist-Variable.woff2); font-weight: 100 900; }`;
 
@@ -51,7 +51,7 @@ async function shot(page, file, { width, height, omitBackground = false }) {
   await p.waitForTimeout(1200);
   await p.screenshot({ path: path.join(OUT, file), omitBackground });
   await p.close();
-  console.log(`store/${file}`);
+  console.log(path.relative(ROOT, path.join(OUT, file)));
 }
 
 fs.mkdirSync(OUT, { recursive: true });
