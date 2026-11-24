@@ -13,14 +13,14 @@ if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64" -and $env:PROCESSOR_ARCHITEW6432 -ne
   # Windows on Arm runs the x64 build under emulation.
   Write-Host "Eyepatch: no native build for $env:PROCESSOR_ARCHITECTURE; using x64."
 }
-$asset = "agent-bridge-windows-x64.zip"
+$asset = "eyepatch-agent-bridge-windows-x64.zip"
 $base = if ($env:EYEPATCH_VERSION) { "https://github.com/$repo/releases/download/v$($env:EYEPATCH_VERSION.TrimStart('v'))" } else { "https://github.com/$repo/releases/latest/download" }
 $dir = Join-Path $env:LOCALAPPDATA "Eyepatch"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("eyepatch-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
-  Write-Host "Downloading Agent Bridge for windows-x64..."
+  Write-Host "Downloading Eyepatch Agent Bridge for windows-x64..."
   $ProgressPreference = "SilentlyContinue" # Invoke-WebRequest is very slow with its progress bar
   Invoke-WebRequest "$base/$asset" -OutFile (Join-Path $tmp $asset) -UseBasicParsing
   Invoke-WebRequest "$base/SHA256SUMS" -OutFile (Join-Path $tmp "SHA256SUMS") -UseBasicParsing
@@ -33,16 +33,16 @@ try {
 
   Expand-Archive (Join-Path $tmp $asset) -DestinationPath $tmp -Force
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
-  $exe = Join-Path $dir "agent-bridge.exe"
+  $exe = Join-Path $dir "eyepatch-agent-bridge.exe"
   # A running copy can't be overwritten, but it can be renamed out of the way.
   if (Test-Path $exe) {
     Remove-Item "$exe.old" -Force -ErrorAction SilentlyContinue
-    Rename-Item $exe "agent-bridge.exe.old" -ErrorAction SilentlyContinue
+    Rename-Item $exe "eyepatch-agent-bridge.exe.old" -ErrorAction SilentlyContinue
   }
-  Move-Item (Join-Path $tmp "agent-bridge.exe") $exe -Force
+  Move-Item (Join-Path $tmp "eyepatch-agent-bridge.exe") $exe -Force
 
   & $exe install
-  Write-Host "Installed Agent Bridge $(& $exe version) in $dir"
+  Write-Host "Installed Eyepatch Agent Bridge $(& $exe version) in $dir"
   Write-Host "Back in Chrome, Eyepatch's Settings page connects to it by itself."
 } finally {
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue

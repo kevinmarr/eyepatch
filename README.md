@@ -47,15 +47,17 @@ messaging), and stops it when Chrome quits. Nothing listens on a port.
    a coding agent.
 4. Click the toolbar icon to open the side panel and ask for a change.
 
-Each Chrome profile (or browser) with Eyepatch runs its own Agent Bridge; they
-share `~/.eyepatch` (mods, chats and installed agents).
+Agent Bridge shows up as `eyepatch-agent-bridge` in Activity Monitor or Task
+Manager while Chrome runs it. Each Chrome profile (or browser) with Eyepatch
+runs its own Agent Bridge; they share `~/.eyepatch` (mods, chats and installed
+agents).
 
 ### Uninstall
 
 Removing the extension leaves Agent Bridge behind. To remove it too, on macOS:
 
 ```bash
-~/Library/Application\ Support/Eyepatch/agent-bridge uninstall && rm -rf ~/Library/Application\ Support/Eyepatch
+~/Library/Application\ Support/Eyepatch/eyepatch-agent-bridge uninstall && rm -rf ~/Library/Application\ Support/Eyepatch
 ```
 
 On Linux the folder is `~/.local/share/eyepatch`; on Windows,
@@ -78,7 +80,7 @@ bun run dev
 `register:dev` points the browsers at a small shim that connects to the Agent
 Bridge `bun run dev` runs (see [Dev loop](#dev-loop)). To have Chrome run a
 standalone build instead, `bun run build`, then run
-`dist/<platform>/agent-bridge install`. Load the extension unpacked as above.
+`dist/<platform>/eyepatch-agent-bridge install`. Load the extension unpacked as above.
 
 ## Tabs and chats
 
@@ -128,7 +130,7 @@ agent is what its new chats start with.
 
 The browser tools reach every agent as an ordinary stdio MCP server named
 `eyepatch`, which ACP requires all agents to support. The agent starts
-`agent-bridge mcp` (Agent Bridge's own executable) for each chat; it's only a
+`eyepatch-agent-bridge mcp` (Agent Bridge's own executable) for each chat; it's only a
 pipe to Agent Bridge over a local socket (`~/.eyepatch/tools-<pid>.sock`,
 owner-only),
 with a per-chat token that ties its tool calls to that chat's tab.
@@ -263,7 +265,7 @@ and preprocessors (`@preprocessor stylus`/`less`) aren't supported.
   id) to pick and install that agent first.
 - **Tests:** `bun test` checks match patterns, mod parsing, the native
   messaging format, and Agent Bridge end to end as Chrome runs it (with a fake
-  agent using the browser tools). `EYEPATCH_TEST_BINARY=dist/<platform>/agent-bridge
+  agent using the browser tools). `EYEPATCH_TEST_BINARY=dist/<platform>/eyepatch-agent-bridge
   bun test` runs that against a build. `bun run test:e2e` loads the extension
   in Playwright's Chromium, which starts a real Agent Bridge (registered as
   the test profile's native messaging host), and checks that mods run: styles,

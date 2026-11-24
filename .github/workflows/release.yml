@@ -53,7 +53,7 @@ jobs:
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           identity="$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
           [ -n "$identity" ] || { echo "No Developer ID Application identity in MACOS_CERTIFICATE"; exit 1; }
-          for f in dist/darwin-*/agent-bridge; do
+          for f in dist/darwin-*/eyepatch-agent-bridge; do
             codesign --force --timestamp --options runtime --entitlements scripts/entitlements.plist --sign "$identity" "$f"
             codesign --verify --strict --verbose=2 "$f"
           done
@@ -66,7 +66,7 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           echo "$APPLE_API_KEY" | base64 --decode > "$RUNNER_TEMP/key.p8"
-          for f in dist/darwin-*/agent-bridge; do
+          for f in dist/darwin-*/eyepatch-agent-bridge; do
             zip="$RUNNER_TEMP/$(basename "$(dirname "$f")").zip"
             ditto -c -k "$f" "$zip"
             out="$(xcrun notarytool submit "$zip" --key "$RUNNER_TEMP/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --wait --output-format json)"
@@ -82,7 +82,7 @@ jobs:
       - name: Ad-hoc sign
         if: env.SIGN != 'true'
         run: |
-          for f in dist/darwin-*/agent-bridge; do
+          for f in dist/darwin-*/eyepatch-agent-bridge; do
             codesign --force --sign - --entitlements scripts/entitlements.plist "$f"
           done
 
@@ -90,14 +90,14 @@ jobs:
         run: |
           mkdir -p ../out
           for d in dist/darwin-*; do
-            tar -czf "../out/agent-bridge-$(basename "$d").tar.gz" -C "$d" agent-bridge
+            tar -czf "../out/eyepatch-agent-bridge-$(basename "$d").tar.gz" -C "$d" eyepatch-agent-bridge
           done
       - uses: actions/upload-artifact@v4
         with:
           name: macos
           path: out/
 
-  linux-windows:
+  linux:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -110,22 +110,45 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-      - run: bun run build linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl windows-x64
+      - run: bun run build linux-x64 linux-arm64 linux-x64-musl linux-arm64-musl
       - name: Package
         run: |
           mkdir -p ../out
           for d in dist/linux-*; do
-            tar -czf "../out/agent-bridge-$(basename "$d").tar.gz" -C "$d" agent-bridge
+            tar -czf "../out/eyepatch-agent-bridge-$(basename "$d").tar.gz" -C "$d" eyepatch-agent-bridge
           done
-          (cd dist/windows-x64 && zip -q "../../../out/agent-bridge-windows-x64.zip" agent-bridge.exe)
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-windows
+          name: linux
+          path: out/
+
+  # On Windows, so the executable gets its file details ("Eyepatch Agent
+  # Bridge" in Task Manager), which Bun can't set when cross-compiling.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run build windows-x64
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ../out | Out-Null
+          Compress-Archive -Path dist/windows-x64/eyepatch-agent-bridge.exe -DestinationPath ../out/eyepatch-agent-bridge-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
           path: out/
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, linux-windows]
+    needs: [macos, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

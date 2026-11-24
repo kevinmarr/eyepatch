@@ -13,7 +13,7 @@ fs.mkdirSync(MODS, { recursive: true });
 const bigBody = "/* filler */\n".repeat(100_000);
 fs.writeFileSync(path.join(MODS, "big.user.css"), `/* ==UserStyle==\n@name Big\n==/UserStyle== */\n@-moz-document domain("example.com") {\n${bigBody}}\n`);
 
-// EYEPATCH_TEST_BINARY=dist/<platform>/agent-bridge tests the compiled
+// EYEPATCH_TEST_BINARY=dist/<platform>/eyepatch-agent-bridge tests the compiled
 // executable instead. The fake agent then runs on it acting as Bun
 // (BUN_BE_BUN=1, inherited by the browser tools' MCP server), as npm agents do.
 const BINARY = process.env.EYEPATCH_TEST_BINARY && path.resolve(process.env.EYEPATCH_TEST_BINARY);
@@ -80,7 +80,7 @@ test("pushes mods on connect, chunked when too big for one message", async () =>
   send({ type: "tool_result", id: call.id, result: { errors: {} } });
 });
 
-test("a chat's agent reaches the browser tools through `agent-bridge mcp`", async () => {
+test("a chat's agent reaches the browser tools through `eyepatch-agent-bridge mcp`", async () => {
   send({ type: "open_chat", tabId: 1 });
   await next((m) => m.type === "chat" && Boolean((m.chat as { ready: boolean; sessionId: string | null }).sessionId));
   send({ type: "prompt", tabId: 1, text: "call get_tab", page: { tabId: 1, url: "https://example.com/", title: "Example" } });

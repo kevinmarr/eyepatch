@@ -8,7 +8,7 @@
 # Chromium-based browser. Running it again updates Agent Bridge.
 #
 # EYEPATCH_VERSION=0.2.0 installs that version instead of the latest.
-# Uninstall: run `agent-bridge uninstall` from the folder this prints, then
+# Uninstall: run `eyepatch-agent-bridge uninstall` from the folder this prints, then
 # delete that folder (and ~/.eyepatch for your mods, chats and agents).
 set -eu
 
@@ -52,12 +52,12 @@ if [ -n "${EYEPATCH_VERSION:-}" ]; then
 else
   base="https://github.com/$REPO/releases/latest/download"
 fi
-asset="agent-bridge-$target.tar.gz"
+asset="eyepatch-agent-bridge-$target.tar.gz"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-echo "Downloading Agent Bridge for $target…"
+echo "Downloading Eyepatch Agent Bridge for $target…"
 curl -fL --progress-bar "$base/$asset" -o "$tmp/$asset" || fail "couldn't download $base/$asset"
 curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail "couldn't download $base/SHA256SUMS"
 
@@ -73,9 +73,9 @@ fi
 tar -xzf "$tmp/$asset" -C "$tmp"
 mkdir -p "$dir"
 # Replace by renaming: a copy Chrome is running keeps working until it quits.
-mv -f "$tmp/agent-bridge" "$dir/agent-bridge"
-chmod 755 "$dir/agent-bridge"
+mv -f "$tmp/eyepatch-agent-bridge" "$dir/eyepatch-agent-bridge"
+chmod 755 "$dir/eyepatch-agent-bridge"
 
-"$dir/agent-bridge" install
-echo "Installed Agent Bridge $("$dir/agent-bridge" version) in $dir"
+"$dir/eyepatch-agent-bridge" install
+echo "Installed Eyepatch Agent Bridge $("$dir/eyepatch-agent-bridge" version) in $dir"
 echo "Back in Chrome, Eyepatch's Settings page connects to it by itself."

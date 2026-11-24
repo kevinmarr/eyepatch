@@ -9,7 +9,7 @@ import { selfUpdate } from "../src/update.ts";
 // version) for linux-x64; v0.3.0's checksum is wrong; v0.4.0's build says
 // it's 0.2.0.
 const TARGET = "linux-x64";
-const ASSET = `agent-bridge-${TARGET}.tar.gz`;
+const ASSET = `eyepatch-agent-bridge-${TARGET}.tar.gz`;
 let dir: string;
 let server: ReturnType<typeof Bun.serve>;
 const files = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -17,9 +17,9 @@ const files = new Map<string, Uint8Array<ArrayBuffer>>();
 async function release(version: string, prints: string, sumsFor?: Uint8Array<ArrayBuffer>) {
   const build = path.join(dir, `build-${version}`);
   await fs.mkdir(build);
-  await fs.writeFile(path.join(build, "agent-bridge"), `#!/bin/sh\necho ${prints}\n`, { mode: 0o755 });
+  await fs.writeFile(path.join(build, "eyepatch-agent-bridge"), `#!/bin/sh\necho ${prints}\n`, { mode: 0o755 });
   const tarball = path.join(dir, `${version}.tar.gz`);
-  await Bun.spawn(["tar", "-czf", tarball, "-C", build, "agent-bridge"]).exited;
+  await Bun.spawn(["tar", "-czf", tarball, "-C", build, "eyepatch-agent-bridge"]).exited;
   const bytes = new Uint8Array(await Bun.file(tarball).arrayBuffer());
   const sum = new Bun.CryptoHasher("sha256").update(sumsFor ?? bytes).digest("hex");
   files.set(`/v${version}/${ASSET}`, bytes);
@@ -48,7 +48,7 @@ afterAll(async () => {
 
 async function installed(version: string) {
   const app = await fs.mkdtemp(path.join(dir, "app-"));
-  const exe = path.join(app, "agent-bridge");
+  const exe = path.join(app, "eyepatch-agent-bridge");
   await fs.writeFile(exe, `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
   return exe;
 }
@@ -60,7 +60,7 @@ test("replaces the executable with the release's", async () => {
   const exe = await installed("0.1.0");
   await selfUpdate("0.2.0", opts(exe));
   assert.equal(await version(exe), "0.2.0");
-  assert.deepEqual(await fs.readdir(path.dirname(exe)), ["agent-bridge"]); // no leftovers
+  assert.deepEqual(await fs.readdir(path.dirname(exe)), ["eyepatch-agent-bridge"]); // no leftovers
 });
 
 test("refuses a download that doesn't match SHA256SUMS", async () => {
@@ -79,7 +79,7 @@ test("fails cleanly when the release doesn't exist", async () => {
   const exe = await installed("0.1.0");
   await assert.rejects(selfUpdate("9.9.9", opts(exe)), /HTTP 404/);
   assert.equal(await version(exe), "0.1.0");
-  assert.deepEqual(await fs.readdir(path.dirname(exe)), ["agent-bridge"]);
+  assert.deepEqual(await fs.readdir(path.dirname(exe)), ["eyepatch-agent-bridge"]);
 });
 
 test("refuses anything that isn't a plain version", async () => {

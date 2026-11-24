@@ -23,10 +23,10 @@ const WANTED = /const BRIDGE_VERSION = "([^"]+)"/.exec(fs.readFileSync(path.join
 const HERE = fs.mkdtempSync(path.join(os.tmpdir(), "eyepatch-update-"));
 const HOME = path.join(HERE, "home");
 const APP = path.join(HERE, "app");
-const EXE = path.join(APP, "agent-bridge");
+const EXE = path.join(APP, "eyepatch-agent-bridge");
 const HOSTS = path.join(HERE, "profile", "NativeMessagingHosts");
 const TARGET = `${process.platform}-${process.arch}`;
-const ASSET = `agent-bridge-${TARGET}.tar.gz`;
+const ASSET = `eyepatch-agent-bridge-${TARGET}.tar.gz`;
 
 let failures = 0;
 const check = (name, ok, detail = "") => {
@@ -44,9 +44,9 @@ function build(version) {
   sh("bun", ["scripts/build.ts", TARGET, "--version", version]);
   const out = path.join(HERE, `build-${version}`);
   fs.mkdirSync(out);
-  fs.copyFileSync(path.join(BRIDGE_DIR, "dist", TARGET, "agent-bridge"), path.join(out, "agent-bridge"));
-  fs.chmodSync(path.join(out, "agent-bridge"), 0o755);
-  return path.join(out, "agent-bridge");
+  fs.copyFileSync(path.join(BRIDGE_DIR, "dist", TARGET, "eyepatch-agent-bridge"), path.join(out, "eyepatch-agent-bridge"));
+  fs.chmodSync(path.join(out, "eyepatch-agent-bridge"), 0o755);
+  return path.join(out, "eyepatch-agent-bridge");
 }
 
 const older = build("0.0.1");
@@ -56,7 +56,7 @@ const newer = build("99.0.0");
 // The fake release: /v<WANTED>/<asset> and its SHA256SUMS.
 const release = path.join(HERE, "release");
 fs.mkdirSync(release);
-sh("tar", ["-czf", path.join(release, ASSET), "-C", path.dirname(wanted), "agent-bridge"]);
+sh("tar", ["-czf", path.join(release, ASSET), "-C", path.dirname(wanted), "eyepatch-agent-bridge"]);
 const sum = new Bun.CryptoHasher("sha256").update(fs.readFileSync(path.join(release, ASSET))).digest("hex");
 fs.writeFileSync(path.join(release, "SHA256SUMS"), `${sum}  ${ASSET}\n`);
 const server = http.createServer((req, res) => {

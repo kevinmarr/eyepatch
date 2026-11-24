@@ -33,7 +33,7 @@ export async function selfUpdate(version: string, opts: UpdateOptions = {}) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Not a version: ${version}`);
 
   const windows = target.startsWith("windows");
-  const asset = `agent-bridge-${target}${windows ? ".zip" : ".tar.gz"}`;
+  const asset = `eyepatch-agent-bridge-${target}${windows ? ".zip" : ".tar.gz"}`;
   const base = `${opts.releases ?? process.env.EYEPATCH_RELEASES_URL ?? RELEASES}/v${version}`;
   console.log(`[update] downloading ${base}/${asset}`);
 
@@ -56,7 +56,7 @@ export async function selfUpdate(version: string, opts: UpdateOptions = {}) {
     await Bun.write(file, archive);
     // bsdtar (macOS, Windows) reads zip too.
     await run(["tar", "-xf", file, "-C", tmp]);
-    const fresh = path.join(tmp, windows ? "agent-bridge.exe" : "agent-bridge");
+    const fresh = path.join(tmp, windows ? "eyepatch-agent-bridge.exe" : "eyepatch-agent-bridge");
     await fs.chmod(fresh, 0o755);
 
     if (process.platform === "darwin") await checkSignature(exe, fresh);

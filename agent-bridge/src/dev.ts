@@ -49,7 +49,7 @@ Chrome reaches this through the dev host (bun run register:dev, once).`);
 }
 
 /**
- * `agent-bridge shim`: what Chrome starts in dev mode. Passes native messages
+ * `eyepatch-agent-bridge shim`: what Chrome starts in dev mode. Passes native messages
  * through to the dev server. If it isn't running, tells the extension so (it
  * shows how to start it) and exits.
  */

@@ -57,7 +57,7 @@ const full = {
 const setup = { connected: false, bridgeWanted: "0.2.0", userScripts: false, agents: null, auths: {}, mods: [] };
 const mismatch = (bridgeProblem, more = {}) => ({ connected: false, bridgeProblem, bridgeWanted: "0.2.0", userScripts: true, agents: null, auths: {}, mods: [], ...more });
 const updating = mismatch("updating", { bridgeVersion: "0.1.0" });
-const update_failed = mismatch("update_failed", { bridgeVersion: "0.1.0", bridgeDetail: "Couldn’t download agent-bridge-darwin-arm64.tar.gz (HTTP 404)" });
+const update_failed = mismatch("update_failed", { bridgeVersion: "0.1.0", bridgeDetail: "Couldn’t download eyepatch-agent-bridge-darwin-arm64.tar.gz (HTTP 404)" });
 const too_old = mismatch("too_old");
 const extension_outdated = mismatch("extension_outdated", { bridgeVersion: "0.3.0" });
 const partial = { connected: true, userScripts: true, agents: { list: list.map((a) => ({ ...a, installedVersion: null })) }, auths: {}, mods: [] };
