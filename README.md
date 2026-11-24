@@ -317,9 +317,15 @@ matching tag:
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-It builds every platform, signs and notarizes the macOS builds (with the
-secrets the workflow lists), and publishes a GitHub release with
-`SHA256SUMS`. Running the workflow by hand only builds.
+It builds every platform, signs and notarizes the macOS builds, and publishes
+a GitHub release with `SHA256SUMS`. Running the workflow by hand only builds.
+
+The Apple secrets the workflow lists live in a GitHub environment named
+`release` (Settings → Environments), set to require your approval and to
+allow only `v*` tags and `main`, so each run that signs waits for you to
+approve it. Signing happens in its own job, which runs nothing but Apple's
+tools on the built executables. Actions are pinned to commits; update them
+by hand when a run warns about them.
 
 An extension release that needs the new Agent Bridge sets `BRIDGE_VERSION` to
 it. **Publish the Agent Bridge release before uploading that extension

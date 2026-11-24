@@ -1,15 +1,25 @@
 # Builds Agent Bridge for every platform. Pushing a tag like v0.2.0 (matching
-# agent-bridge/package.json) publishes a GitHub release, which install.sh and
-# install.ps1 download. Running it by hand (Actions → Release → Run workflow)
-# only builds, to check that signing and notarization work.
+# agent-bridge/package.json) publishes a GitHub release, which install.sh,
+# install.ps1 and Agent Bridge's self-update download. Running it by hand
+# (Actions → Release → Run workflow) only builds, to check that signing and
+# notarization work.
 #
-# macOS builds are signed with a Developer ID and notarized when these repo
-# secrets are set (otherwise they're ad-hoc signed):
+# macOS builds are signed with a Developer ID and notarized when these secrets
+# are set in the "release" environment (otherwise they're ad-hoc signed):
 #   MACOS_CERTIFICATE           base64 of the "Developer ID Application" .p12
 #   MACOS_CERTIFICATE_PASSWORD  that .p12's password
 #   APPLE_API_KEY               base64 of an App Store Connect API key (.p8)
 #   APPLE_API_KEY_ID            its key ID
 #   APPLE_API_ISSUER_ID         its issuer ID
+#
+# Security:
+# - Only tags and manual runs trigger this; pull requests never do.
+# - The secrets are only in the macos-sign job, which runs no third-party
+#   code: it gets the built executables as artifacts and runs Apple's tools.
+#   Its environment should require approval and allow only v* tags and main.
+# - Every action is pinned to a commit, so a moved tag can't change what
+#   runs. Update the pins by hand when a run warns about them (e.g. an old
+#   Node version being retired).
 name: Release
 
 on:
@@ -21,20 +31,43 @@ permissions:
   contents: read
 
 jobs:
-  macos:
+  macos-build:
     runs-on: macos-latest
-    env:
-      SIGN: ${{ secrets.MACOS_CERTIFICATE != '' }}
     defaults:
       run:
         working-directory: agent-bridge
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run build darwin-arm64 darwin-x64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-unsigned
+          path: agent-bridge/dist/darwin-*/eyepatch-agent-bridge
+
+  macos-sign:
+    needs: macos-build
+    runs-on: macos-latest
+    environment: release
+    env:
+      SIGN: ${{ secrets.MACOS_CERTIFICATE != '' }}
+    steps:
+      # Only the entitlements file: nothing from the repo runs here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: agent-bridge/scripts/entitlements.plist
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-unsigned
+          path: build
+      - run: chmod 755 build/darwin-*/eyepatch-agent-bridge # artifacts don't keep permissions
 
       - name: Sign with Developer ID
         if: env.SIGN == 'true'
@@ -49,12 +82,13 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           identity="$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
           [ -n "$identity" ] || { echo "No Developer ID Application identity in MACOS_CERTIFICATE"; exit 1; }
-          for f in dist/darwin-*/eyepatch-agent-bridge; do
-            codesign --force --timestamp --options runtime --entitlements scripts/entitlements.plist --sign "$identity" "$f"
+          for f in build/darwin-*/eyepatch-agent-bridge; do
+            codesign --force --timestamp --options runtime --entitlements agent-bridge/scripts/entitlements.plist --sign "$identity" "$f"
             codesign --verify --strict --verbose=2 "$f"
           done
 
@@ -66,7 +100,7 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           echo "$APPLE_API_KEY" | base64 --decode > "$RUNNER_TEMP/key.p8"
-          for f in dist/darwin-*/eyepatch-agent-bridge; do
+          for f in build/darwin-*/eyepatch-agent-bridge; do
             zip="$RUNNER_TEMP/$(basename "$(dirname "$f")").zip"
             ditto -c -k "$f" "$zip"
             out="$(xcrun notarytool submit "$zip" --key "$RUNNER_TEMP/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --wait --output-format json)"
@@ -75,24 +109,26 @@ jobs:
             if [ "$status" != "Accepted" ]; then
               id="$(echo "$out" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
               xcrun notarytool log "$id" --key "$RUNNER_TEMP/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
+              rm "$RUNNER_TEMP/key.p8"
               exit 1
             fi
           done
+          rm "$RUNNER_TEMP/key.p8"
 
       - name: Ad-hoc sign
         if: env.SIGN != 'true'
         run: |
-          for f in dist/darwin-*/eyepatch-agent-bridge; do
-            codesign --force --sign - --entitlements scripts/entitlements.plist "$f"
+          for f in build/darwin-*/eyepatch-agent-bridge; do
+            codesign --force --sign - --entitlements agent-bridge/scripts/entitlements.plist "$f"
           done
 
       - name: Package
         run: |
-          mkdir -p ../out
-          for d in dist/darwin-*; do
-            tar -czf "../out/eyepatch-agent-bridge-$(basename "$d").tar.gz" -C "$d" eyepatch-agent-bridge
+          mkdir -p out
+          for d in build/darwin-*; do
+            tar -czf "out/eyepatch-agent-bridge-$(basename "$d").tar.gz" -C "$d" eyepatch-agent-bridge
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos
           path: out/
@@ -103,8 +139,10 @@ jobs:
       run:
         working-directory: agent-bridge
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
@@ -117,7 +155,7 @@ jobs:
           for d in dist/linux-*; do
             tar -czf "../out/eyepatch-agent-bridge-$(basename "$d").tar.gz" -C "$d" eyepatch-agent-bridge
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux
           path: out/
@@ -130,8 +168,10 @@ jobs:
       run:
         working-directory: agent-bridge
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
@@ -141,26 +181,29 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force ../out | Out-Null
           Compress-Archive -Path dist/windows-x64/eyepatch-agent-bridge.exe -DestinationPath ../out/eyepatch-agent-bridge-windows-x64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
           path: out/
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, linux, windows]
+    needs: [macos-sign, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check the tag matches Agent Bridge's version
         run: |
           version="$(jq -r .version agent-bridge/package.json)"
           [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME doesn't match agent-bridge/package.json ($version)"; exit 1; }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: out
+          pattern: "{macos,linux,windows}"
           merge-multiple: true
       - name: Publish
         env:

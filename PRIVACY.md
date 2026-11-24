@@ -21,6 +21,7 @@ terms of your AI provider apply to usage in Eyepatch.
 
 Eyepatch makes requests to the following services:
 - The Agent Client Protocol registry (cdn.agentclientprotocol.com), to fetch the list of available ACP agents.
+- Wherever that registry says an agent is published (for example GitHub or npm), to download the agents you choose to install and their updates.
 - This project's GitHub Releases (github.com), to download updates to Eyepatch Agent Bridge, the extension's companion program.
 - Whatever your mods ask for: files a userscript names with `@require` or `@resource`, and requests it makes with `GM_xmlhttpRequest`.
 
