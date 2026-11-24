@@ -52,9 +52,10 @@ the side panel, or not at all:
 - **`unsafeWindow`** in isolated scripts is a bridge to the page's `window`
   (`extension/unsafe-window.js`). Untested with real-world scripts (e.g. ones
   that hook page functions heavily); each access is a synchronous round trip.
-- **More of the GM API:** `GM_download`, `GM_cookie`, `GM_getTab`/`GM_saveTab`,
-  `GM_webRequest`; forbidden request headers in `GM_xmlhttpRequest` (needs
-  `declarativeNetRequest`); `GM_notification` click callbacks.
+- **More of the GM API:** `GM_download`, `GM_cookie`, `GM_webRequest`;
+  forbidden request headers in `GM_xmlhttpRequest` (needs
+  `declarativeNetRequest`). `GM_notification`'s `onclick` is untested (the GM
+  suite can't click a notification); `ondone` is covered.
 - **UserCSS:** `@var` values are fixed at their defaults. Settings could let
   you change them. Preprocessors (Stylus, Less) aren't supported.
 

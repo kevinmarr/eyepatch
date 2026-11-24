@@ -245,6 +245,18 @@
     "unsafeWindow reads page globals": 7,
     "unsafeWindow sets page globals": 5,
     "unsafeWindow calls page functions, with callbacks": "2,4,6",
-    "unsafeWindow.document is the page's": "suite-out"
+    "unsafeWindow.document is the page's": "suite-out",
+    "getTab starts empty": {},
+    "saveTab then getTab and getTabs": [
+      {
+        "visited": 3
+      },
+      true
+    ],
+    "GM.getTab": 3,
+    "notification: remove calls ondone": [
+      "function",
+      "done"
+    ]
   }
 }

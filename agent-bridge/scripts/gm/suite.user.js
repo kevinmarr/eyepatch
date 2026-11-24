@@ -30,6 +30,11 @@
 // @grant        GM_getResourceURL
 // @grant        GM.getResourceUrl
 // @grant        GM_info
+// @grant        GM_getTab
+// @grant        GM_saveTab
+// @grant        GM_getTabs
+// @grant        GM.getTab
+// @grant        GM_notification
 // @noframes
 // ==/UserScript==
 
@@ -294,6 +299,23 @@
   await test("openInTab handle", () => {
     const t = GM_openInTab(`${ORIGIN}/opened.html`, true);
     return [typeof t, typeof t.close, t.closed];
+  });
+
+  await test("getTab starts empty", () => new Promise((r) => GM_getTab((t) => r(t))));
+  await test("saveTab then getTab and getTabs", async () => {
+    GM_saveTab({ visited: 3 });
+    const tab = await new Promise((r) => GM_getTab(r));
+    const tabs = await new Promise((r) => GM_getTabs(r));
+    return [tab, Object.values(tabs).some((t) => t?.visited === 3)];
+  });
+  await test("GM.getTab", async () => (await GM.getTab()).visited);
+  await test("notification: remove calls ondone", async () => {
+    let done;
+    const ended = new Promise((r) => (done = r));
+    const n = GM_notification({ text: "suite", title: "Suite", ondone: () => done("done") });
+    await new Promise((r) => setTimeout(r, 300));
+    n.remove();
+    return [typeof n.remove, await Promise.race([ended, new Promise((r) => setTimeout(() => r("no ondone"), 3000))])];
   });
 
   // suite.html sets window.appState = 7 in the page.

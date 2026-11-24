@@ -280,7 +280,8 @@ GM_addStyle(\`.Layout-sidebar { display: none !important; }\`);
   \`GM_addValueChangeListener\`), \`GM_xmlhttpRequest\` (cross-origin requests;
   list each host it reaches with \`@connect example.com\`), \`GM_registerMenuCommand\`
   (shows in the side panel's menu under the mod), \`GM_openInTab\`,
-  \`GM_notification\`, \`GM_setClipboard\`, \`GM_getResourceText\`/\`GM_getResourceURL\`,
+  \`GM_notification\` (with \`onclick\`/\`ondone\`), \`GM_getTab\`/\`GM_saveTab\`/\`GM_getTabs\`
+  (an object per tab, kept until it closes), \`GM_setClipboard\`, \`GM_getResourceText\`/\`GM_getResourceURL\`,
   \`GM_info\`, \`GM_log\`, and the \`GM.*\` promise versions of each.
 - \`@require <url>\` and \`@resource <name> <url>\` are downloaded once and cached.
 - Changes reload the tab whose agent made them.

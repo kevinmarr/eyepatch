@@ -69,6 +69,7 @@ const GM_NAMES = [
   "GM_addStyle", "GM_addElement", "GM_getResourceText", "GM_getResourceURL",
   "GM_xmlhttpRequest", "GM_openInTab", "GM_notification", "GM_setClipboard",
   "GM_registerMenuCommand", "GM_unregisterMenuCommand", "GM_log",
+  "GM_getTab", "GM_saveTab", "GM_getTabs",
 ];
 
 /** GM functions that use the mod's stored values. */
@@ -255,6 +256,7 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
   if (isolated) {
     globalThis.__eyepatchGM = {
       value: remoteChange,
+      notified: (n, event) => notified(n, event), // defined below
       menu(id) {
         try {
           menu.get(id)?.();
@@ -324,9 +326,56 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
     tab.catch(logError);
     return handle;
   };
+  // GM_notification(details) or (text, title, image, onclick). Returns a
+  // handle with remove(); GM.notification resolves once it's gone.
+  const shown = new Map(); // the page's id -> { details, id (the extension's), done }
+  let notificationSeq = 0;
   const notification = (details, ...rest) => {
-    const d = typeof details === "string" ? { text: details, title: rest[0], image: rest[1] } : details ?? {};
-    return call("notification", { title: d.title, text: d.text, image: d.image }).catch(logError);
+    const d = typeof details === "string" ? { text: details, title: rest[0], image: rest[1], onclick: rest[2] } : { ...(details ?? {}) };
+    const n = String(++notificationSeq);
+    let resolveDone;
+    const entry = { details: d, done: new Promise((r) => (resolveDone = r)), resolveDone };
+    shown.set(n, entry);
+    const wants = { click: typeof d.onclick === "function", done: true };
+    const image = typeof d.image === "string" ? new URL(d.image, location.href).href : undefined;
+    const created = call("notification", { title: d.title, text: d.text, image, silent: d.silent, highlight: d.highlight, timeout: d.timeout, tag: d.tag }, n, wants);
+    created.catch((e) => {
+      logError(e);
+      shown.delete(n);
+      entry.resolveDone(false);
+    });
+    return {
+      remove: () => created.then((id) => call("notificationRemove", id)).catch(logError),
+      done: entry.done,
+    };
+  };
+  const notified = (n, event) => {
+    const entry = shown.get(n);
+    if (!entry) return;
+    const fire = (name) => {
+      try {
+        entry.details[name]?.({ event: name });
+      } catch (e) {
+        logError(e);
+      }
+    };
+    if (event === "click") return fire("onclick");
+    shown.delete(n);
+    fire("ondone");
+    entry.resolveDone(true);
+  };
+
+  // ---- per-tab objects ----
+  const getTab = (cb) => {
+    const p = call("getTab");
+    if (typeof cb === "function") p.then((t) => cb(t), logError);
+    return p;
+  };
+  const saveTab = (obj) => call("saveTab", clone(obj ?? {})).catch(logError);
+  const getTabs = (cb) => {
+    const p = call("getTabs");
+    if (typeof cb === "function") p.then((t) => cb(t), logError);
+    return p;
   };
 
   // ---- cross-origin requests ----
@@ -470,6 +519,7 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
     addStyle, addElement, getResourceText, getResourceURL,
     xmlhttpRequest, openInTab, notification, setClipboard,
     registerMenuCommand, unregisterMenuCommand,
+    getTab, saveTab, getTabs,
     log: (...a) => console.log(...a),
   };
   const asyncNames = { xmlhttpRequest: "xmlHttpRequest", getResourceURL: "getResourceUrl" };
@@ -486,7 +536,10 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
   for (const [name, fn] of Object.entries(fns)) {
     if (!grants.has(name)) continue;
     api[`GM_${name}`] = fn;
-    GM[asyncNames[name] ?? name] = name === "xmlhttpRequest" ? xmlHttpRequestPromise : async (...a) => fn(...a);
+    GM[asyncNames[name] ?? name] =
+      name === "xmlhttpRequest" ? xmlHttpRequestPromise
+        : name === "notification" ? (...a) => fn(...a).done
+          : async (...a) => fn(...a);
   }
   // Granted functions Eyepatch doesn't have throw a clear error instead of being undefined.
   for (const g of cfg.granted) {

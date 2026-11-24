@@ -219,6 +219,7 @@ const GM_FUNCTIONS: Record<string, string> = Object.fromEntries(
     "addStyle", "addElement", "getResourceText", "getResourceURL",
     "xmlhttpRequest", "openInTab", "notification", "setClipboard",
     "registerMenuCommand", "unregisterMenuCommand", "log", "info",
+    "getTab", "saveTab", "getTabs",
   ].map((n) => [n.toLowerCase(), n]),
 );
 /** Ones that work without the extension, so also in the page's world. */

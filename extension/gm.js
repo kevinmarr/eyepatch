@@ -178,6 +178,7 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
   }
 
   function forgetTab(tabId) {
+    void forgetTabObjects(tabId);
     loadStarts.delete(tabId);
     if (menus.delete(tabId)) saveMenus(tabId);
   }
@@ -192,6 +193,84 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
       .catch((e) => console.warn("[eyepatch] menu command:", e));
   }
 
+  // ---------- notifications ----------
+  // GM_notification's onclick and ondone run in the page that showed it.
+  // Kept in session storage, since the service worker may restart while one
+  // is showing.
+
+  const notifications = new Map(); // notification id -> { modId, n, tabId, documentId, highlight, wants }
+  let notificationSeq = 0;
+  const notificationsLoaded = chrome.storage.session
+    .get("gmNotifications")
+    .then(({ gmNotifications }) => {
+      for (const [id, v] of Object.entries(gmNotifications ?? {})) if (!notifications.has(id)) notifications.set(id, v);
+    })
+    .catch(() => {});
+  const saveNotifications = () => chrome.storage.session.set({ gmNotifications: Object.fromEntries(notifications) }).catch(() => {});
+
+  /** Tell the page its notification was clicked (`clicked`) or is gone. */
+  async function callNotification(entry, event) {
+    if (entry.tabId == null || !entry.wants[event]) return;
+    const code = `globalThis.__eyepatchGM?.notified(${JSON.stringify(entry.n)}, ${JSON.stringify(event)});`;
+    await chrome.userScripts
+      .execute({ target: { tabId: entry.tabId, ...(entry.documentId ? { documentIds: [entry.documentId] } : {}) }, js: [{ code }], world: "USER_SCRIPT", worldId: worldIdOf(entry.modId) })
+      .catch(() => {});
+  }
+
+  async function finishNotification(id, clear = true) {
+    const entry = notifications.get(id);
+    if (!entry) return;
+    notifications.delete(id);
+    saveNotifications();
+    if (clear) await chrome.notifications.clear(id).catch(() => {});
+    await callNotification(entry, "done");
+  }
+
+  chrome.notifications.onClicked.addListener(async (id) => {
+    if (!id.startsWith("gm:")) return;
+    await notificationsLoaded;
+    const entry = notifications.get(id);
+    if (!entry) return;
+    if (entry.highlight && entry.tabId != null) {
+      chrome.tabs
+        .update(entry.tabId, { active: true })
+        .then((tab) => chrome.windows.update(tab.windowId, { focused: true }))
+        .catch(() => {});
+    }
+    await callNotification(entry, "click");
+    await finishNotification(id);
+  });
+  chrome.notifications.onClosed.addListener(async (id) => {
+    if (!id.startsWith("gm:")) return;
+    await notificationsLoaded;
+    await finishNotification(id, false);
+  });
+
+  // ---------- per-tab objects (GM_getTab / GM_saveTab) ----------
+  // In session storage, as "gmt:<mod id>" -> { tab id: object }; gone when
+  // the browser closes, and a tab's entry when the tab does.
+
+  const tabsKey = (modId) => `gmt:${modId}`;
+  const tabWrites = new Map(); // mod id -> promise of the last write
+  /** A mod's tab objects, after any save still being written. */
+  const readTabs = async (modId) => {
+    await tabWrites.get(modId);
+    return (await chrome.storage.session.get(tabsKey(modId)).catch(() => ({})))[tabsKey(modId)] ?? {};
+  };
+  function updateTabs(modId, fn) {
+    const next = (tabWrites.get(modId) ?? Promise.resolve()).then(async () => {
+      const tabs = (await chrome.storage.session.get(tabsKey(modId)))[tabsKey(modId)] ?? {};
+      fn(tabs);
+      await chrome.storage.session.set({ [tabsKey(modId)]: tabs });
+    });
+    tabWrites.set(modId, next.catch(() => {}));
+    return next;
+  }
+  async function forgetTabObjects(tabId) {
+    const all = await chrome.storage.session.get(null).catch(() => ({}));
+    for (const k of Object.keys(all)) if (k.startsWith("gmt:") && String(tabId) in all[k]) await updateTabs(k.slice(4), (tabs) => delete tabs[tabId]);
+  }
+
   // ---------- requests from pages ----------
 
   const STORAGE = ["getValue", "setValue", "deleteValue", "listValues", "getValues", "setValues", "deleteValues", "addValueChangeListener"];
@@ -202,6 +281,10 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
     openInTab: ["openInTab"],
     closeTab: ["openInTab"],
     notification: ["notification"],
+    notificationRemove: ["notification"],
+    getTab: ["getTab", "saveTab", "getTabs"],
+    saveTab: ["saveTab"],
+    getTabs: ["getTabs"],
     menuRegister: ["registerMenuCommand"],
     menuUnregister: ["registerMenuCommand", "unregisterMenuCommand"],
   };
@@ -251,10 +334,39 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
         return null;
       }
       case "notification": {
-        const [{ title, text, image } = {}] = args;
-        const opts = { type: "basic", iconUrl: image || "icons/icon128.png", title: String(title || mod.name), message: String(text ?? "") || " " };
-        await chrome.notifications.create(`gm:${modId}:${Date.now()}`, opts).catch(() => chrome.notifications.create({ ...opts, iconUrl: "icons/icon128.png" }));
+        // `n` is the page's id for it, used to call its onclick/ondone back.
+        const [{ title, text, image, silent, highlight, timeout, tag } = {}, n, wants = {}] = args;
+        await notificationsLoaded;
+        const id = `gm:${modId}:${tag ? `tag:${String(tag).slice(0, 100)}` : `${Date.now()}:${++notificationSeq}`}`;
+        const opts = { type: "basic", iconUrl: image || "icons/icon128.png", title: String(title || mod.name), message: String(text ?? "") || " ", silent: Boolean(silent) };
+        // A notification with the same tag replaces the last one, which is done.
+        if (notifications.has(id)) await finishNotification(id, false);
+        notifications.set(id, { modId, n, tabId, documentId: sender.documentId, highlight: Boolean(highlight), wants });
+        saveNotifications();
+        await chrome.notifications.create(id, opts).catch(() => chrome.notifications.create(id, { ...opts, iconUrl: "icons/icon128.png" }));
+        if (timeout > 0) setTimeout(() => chrome.notifications.clear(id).catch(() => {}), Math.min(Number(timeout), 600_000));
+        return id;
+      }
+      case "notificationRemove": {
+        const [id] = args;
+        if (notifications.get(id)?.modId === modId) await chrome.notifications.clear(id).catch(() => {});
         return null;
+      }
+      case "getTab": {
+        if (tabId == null) return {};
+        return (await readTabs(modId))[tabId] ?? {};
+      }
+      case "saveTab": {
+        if (tabId == null) return null;
+        const [obj] = args;
+        await updateTabs(modId, (tabs) => (tabs[tabId] = obj ?? {}));
+        return null;
+      }
+      case "getTabs": {
+        // Only tabs that still exist.
+        const tabs = await readTabs(modId);
+        const open = new Set((await chrome.tabs.query({}).catch(() => [])).map((t) => String(t.id)));
+        return Object.fromEntries(Object.entries(tabs).filter(([id]) => open.has(id)));
       }
       case "menuRegister":
       case "menuUnregister": {

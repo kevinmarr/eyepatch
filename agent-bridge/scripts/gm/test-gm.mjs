@@ -96,6 +96,7 @@ let ctx = await launch();
 let [sw] = ctx.serviceWorkers();
 if (!sw) sw = await ctx.waitForEvent("serviceworker");
 const extId = sw.url().split("/")[2];
+if (process.env.DEBUG) ctx.on("console", (m) => m.type() !== "log" && console.log("extension:", m.type(), m.text()));
 const setup = ctx.pages()[0] ?? (await ctx.newPage());
 await setup.goto(`chrome://extensions/?id=${extId}`);
 await setup.locator("#allow-user-scripts cr-toggle").click();
@@ -126,6 +127,7 @@ if (referenceExt) {
   for (let i = 0; i < 80; i++) {
     const n = await worker()?.evaluate(() => chrome.userScripts.getScripts().then((s) => s.length)).catch(() => 0);
     if (n >= 4) break;
+    if (process.env.DEBUG && i % 8 === 0) console.log("registered:", await worker()?.evaluate(() => chrome.userScripts.getScripts().then((s) => s.map((x) => x.id).join())).catch((e) => e.message));
     await new Promise((r) => setTimeout(r, 250));
   }
 }
