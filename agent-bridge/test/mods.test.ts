@@ -51,14 +51,15 @@ test("GM grants in both spellings; unknown ones warn", () => {
     @grant GM.getValue
     @grant GM_setValue
     @grant GM.xmlHttpRequest
+    @grant GM_webRequest
     @grant GM_download
     @grant GM_addStyle
     @grant GM.getResourceUrl
     @grant unsafeWindow
     @grant window.close
   `));
-  assert.deepEqual(m.grants?.sort(), ["addStyle", "getResourceURL", "getValue", "setValue", "xmlhttpRequest"]);
-  assert.deepEqual(m.warnings, ["unsupported @grant: GM_download"]);
+  assert.deepEqual(m.grants?.sort(), ["addStyle", "download", "getResourceURL", "getValue", "setValue", "xmlhttpRequest"]);
+  assert.deepEqual(m.warnings, ["unsupported @grant: GM_webRequest"]);
   assert.equal(m.world, "isolated");
 });
 
