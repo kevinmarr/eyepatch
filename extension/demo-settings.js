@@ -44,6 +44,7 @@ const full = {
     cursor: { agent: "Cursor", state: "unauthenticated", accounts: [], methods: [{ id: "cursor", name: "Cursor account" }], error: "the link expired" },
     opencode: { agent: "OpenCode", state: "authenticated", accounts: [{ label: "OpenRouter API key" }], methods: [], restartPending: true },
   },
+  modUpdates: { checking: false, lastCheck: Date.now() - 3 * 3600e3, mods: { "kl-wine-searcher.user.js": { version: "2.1.0" }, "dark-mode.user.css": { edited: true } } },
   mods: [
     { id: "substack-readable-toc.user.css", sites: ["substack.com"], name: "Substack: legible table of contents", description: "Moves the contents into the margin and highlights the current section", enabled: true, vars: [
       { name: "accent", type: "color", label: "Highlight color", default: "#1a73e8", value: "#d93025" },

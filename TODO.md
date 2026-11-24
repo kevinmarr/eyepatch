@@ -46,9 +46,10 @@ the side panel, or not at all:
 
 ## 4. Mods
 
-- **Updates for imported mods:** scripts from Greasy Fork and similar have
-  `@updateURL`/`@downloadURL`. Check them, offer the update in Settings, and
-  stop once the agent or the user has edited the file.
+- **Updates for imported mods** (`agent-bridge/src/updates.ts`): checked
+  daily and from Settings' "Check for updates"; try it with a real Greasy
+  Fork script. An edited mod stops getting offers for good; there's no way
+  yet to drop your changes and take the update.
 - **`unsafeWindow`** in isolated scripts is a bridge to the page's `window`
   (`extension/unsafe-window.js`). Untested with real-world scripts (e.g. ones
   that hook page functions heavily); each access is a synchronous round trip.

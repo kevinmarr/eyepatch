@@ -50,6 +50,12 @@ function connectPort() {
   port.onMessage.addListener((msg) => {
     if (msg.type === "state") render(msg.state);
     else if (msg.type === "mod_imported") imported(msg);
+    else if (msg.type === "mod_update_failed") {
+      updatingMod = null;
+      showModsStatus([`Couldn’t update ${msg.id}: ${msg.error}`]);
+      modsKey = "";
+      if (state) rerender();
+    }
   });
   port.postMessage({ type: "color_scheme", dark: matchMedia("(prefers-color-scheme: dark)").matches });
   // The service worker was suspended or reloaded; reconnect.
@@ -523,6 +529,7 @@ const siteList = (sites, n = 2) => sites.slice(0, n).join(", ") + (sites.length 
 
 let modsKey = "";
 let editingVars = null; // the UserCSS mod whose @var settings are open
+let updatingMod = null; // the mod whose update was asked for, until it arrives
 
 // GM_download and GM_cookie need permissions Eyepatch asks for only when a
 // mod uses them: the mod's row offers them (Chrome wants a click to ask).
@@ -555,7 +562,9 @@ function renderMods(s) {
   // While a mod's settings are open, its own values changing doesn't rebuild
   // the list (the controls already show them, and a slider keeps its drag).
   const keyed = mods.map((m) => (m.id === editingVars ? { ...m, vars: m.vars?.map(({ value, ...v }) => v) } : m));
-  const key = JSON.stringify([keyed, confirming, currentMod, [...permitted], editingVars]);
+  const updates = s.modUpdates?.mods ?? {};
+  renderUpdatesLine(s);
+  const key = JSON.stringify([keyed, confirming, currentMod, [...permitted], editingVars, updates, updatingMod]);
   if (key === modsKey) return arrived && showCurrentMod();
   modsKey = key;
   const bySite = new Map();
@@ -581,6 +590,9 @@ function renderMods(s) {
             : `<div class="row" data-mod="${esc(m.id)}"${m.id === currentMod ? ` aria-current="true" tabindex="-1"` : ""}><div class="main"><span class="name">${esc(m.name)}${site === OTHER_MODS ? sitesIcon(sitesOf(m)) : ""}</span>` +
               `<span class="sub${m.error ? " danger" : ""}" title="${esc([m.error ?? m.description, ...(m.warnings ?? []), m.id].filter(Boolean).join("\n"))}">${esc(m.error ?? m.description ?? m.id)}</span>` +
               `</div>` +
+              (updates[m.id]?.version
+                ? `<button type="button" class="btn" data-do="update"${updatingMod === m.id ? " disabled" : ""}>${updatingMod === m.id ? "Updating…" : `Update to ${esc(updates[m.id].version)}`}</button>`
+                : "") +
               missingPermissions(m).map((o) => `<button type="button" class="btn" data-do="permit" data-permission="${o.permission}">${o.label}</button>`).join("") +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
               (m.vars?.length && !m.error
@@ -596,6 +608,30 @@ function renderMods(s) {
     .join("");
   if (arrived) showCurrentMod();
 }
+
+/** "Check for updates", once any mod came from the web. */
+function renderUpdatesLine(s) {
+  const u = s.modUpdates;
+  const box = $("mods-updates");
+  box.hidden = !s.connected || !u || !Object.keys(u.mods).length;
+  if (box.hidden) return;
+  // A finished update: the version it offered is gone.
+  if (updatingMod && !u.mods[updatingMod]?.version) updatingMod = null;
+  const ago = (t) => {
+    const m = Math.round((Date.now() - t) / 60000);
+    return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+  };
+  const errors = Object.entries(u.mods).filter(([, x]) => x.error).map(([id]) => s.mods?.find((m) => m.id === id)?.name ?? id);
+  const html = u.checking
+    ? `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}Checking for updates…</span>`
+    : `<button type="button" class="btn quiet" data-do="check-updates">Check for updates</button>` +
+      (u.lastCheck ? `<span class="muted" title="${esc(new Date(u.lastCheck).toLocaleString())}">Checked ${ago(u.lastCheck)}</span>` : "") +
+      (errors.length ? `<span class="error-text">Couldn’t check ${esc(siteList(errors))}</span>` : "");
+  if (box.dataset.html !== html) box.innerHTML = box.dataset.html = html;
+}
+$("mods-updates").addEventListener("click", (e) => {
+  if (e.target.closest("[data-do=check-updates]")) post({ type: "mods_check_updates" });
+});
 
 /** A UserCSS mod's @var settings, in an inset box under its row. */
 function varsBox(m) {
@@ -699,6 +735,12 @@ $("mods").addEventListener("click", (e) => {
     return post({ type: "mod_set_enabled", id, enabled });
   }
   if (what === "reveal") return post({ type: "mod_reveal", id });
+  if (what === "update") {
+    updatingMod = id;
+    showModsStatus([]);
+    post({ type: "mod_update", id });
+    return rerender();
+  }
   if (what === "vars") editingVars = editingVars === id ? null : id;
   else if (what === "vars-reset") {
     post({ type: "mod_set_vars", id, values: null });
@@ -729,10 +771,11 @@ $("mods").addEventListener("click", (e) => {
 let importSeq = 0;
 const importing = new Map(); // request id -> { name, done(result) }
 
-function importMod(fileName, content, done) {
+/** `url`: where it was installed from, which updates can come from. */
+function importMod(fileName, content, done, url) {
   const requestId = `i${++importSeq}`;
   importing.set(requestId, { name: fileName, done });
-  post({ type: "mod_import", requestId, fileName, content });
+  post({ type: "mod_import", requestId, fileName, content, ...(url ? { url } : {}) });
 }
 
 function imported(msg) {
@@ -831,7 +874,7 @@ async function offerInstall(url) {
       $("install-dialog").close();
       history.replaceState(null, "", location.pathname);
       $("mods-section").scrollIntoView({ block: "start" });
-    });
+    }, url);
   };
 }
 if (installUrl) offerInstall(installUrl);

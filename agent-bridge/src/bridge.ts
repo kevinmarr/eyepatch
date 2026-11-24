@@ -5,6 +5,7 @@ import { Extension } from "./extension.ts";
 import { deleteMod, ensureModsDir, importMod, loadMods, revealMod, setModEnabled, setModVars, watchDir, watchMods } from "./mods.ts";
 import { ToolServer } from "./tools.ts";
 import { cleanUpAfterUpdate, selfUpdate } from "./update.ts";
+import { applyUpdate, checkForUpdates, forgetInstalled, recordInstalled, scheduleUpdateChecks, updatesView } from "./updates.ts";
 
 /**
  * Agent Bridge itself: agents, chats, browser tools and mods, talking to the
@@ -41,7 +42,17 @@ export async function startBridge({ dev }: { dev: boolean }) {
     extension.holdCallsUntil(work);
   }
 
-  extension.onConnect(() => pushMods());
+  /** Tell Settings which mods have updates. */
+  async function sendUpdates() {
+    if (!extension.connected) return;
+    extension.send({ type: "mod_updates", updates: await updatesView().catch(() => null) });
+  }
+  scheduleUpdateChecks(() => void sendUpdates());
+
+  extension.onConnect(() => {
+    pushMods();
+    void sendUpdates();
+  });
   extension.on((msg) => {
     // The extension wants another version: replace this executable, then it restarts us.
     if (msg.type === "bridge_update") {
@@ -61,11 +72,26 @@ export async function startBridge({ dev }: { dev: boolean }) {
     if (msg.type === "mod_set_enabled") setModEnabled(msg.id, msg.enabled).then(() => pushMods([msg.id]), fail(msg.id));
     // UserCSS @var values from Settings; styles hot-swap.
     if (msg.type === "mod_set_vars") setModVars(msg.id, msg.values).then(() => pushMods([msg.id]), fail(msg.id));
-    if (msg.type === "mod_delete") deleteMod(msg.id).catch(fail(msg.id));
+    if (msg.type === "mod_delete") deleteMod(msg.id).then(() => forgetInstalled(msg.id), fail(msg.id));
+    if (msg.type === "mods_check_updates") void checkForUpdates(() => void sendUpdates());
+    if (msg.type === "mod_update") {
+      applyUpdate(msg.id).then(
+        () => sendUpdates(),
+        (e: Error) => {
+          console.error(`[mods] updating ${msg.id}:`, e.message);
+          extension.send({ type: "options_event", event: { type: "mod_update_failed", id: msg.id, error: e.message } });
+        },
+      );
+    }
     if (msg.type === "mod_reveal") revealMod(msg.id).catch(fail(msg.id));
     if (msg.type === "mod_import") {
       importMod(msg.fileName, msg.content).then(
-        (id) => extension.send({ type: "options_event", event: { type: "mod_imported", requestId: msg.requestId, id } }),
+        async (id) => {
+          // Installed from a URL: updates can come from there (see updates.ts).
+          await recordInstalled(id, msg.content, msg.url).catch(() => {});
+          extension.send({ type: "options_event", event: { type: "mod_imported", requestId: msg.requestId, id } });
+          void sendUpdates();
+        },
         (e: Error) => extension.send({ type: "options_event", event: { type: "mod_imported", requestId: msg.requestId, error: e.message } }),
       );
     }
@@ -76,6 +102,7 @@ export async function startBridge({ dev }: { dev: boolean }) {
     // site (which may have their own chats going). A hand edit reloads all.
     const editors = chats.tabsThatEdited(ids);
     pushMods(ids, editors.length ? editors : null);
+    void sendUpdates(); // an edited mod stops getting updates
   });
 
   // Dev loop for the extension itself: edit a file in extension/ and it reloads.

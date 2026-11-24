@@ -27,7 +27,9 @@ export type FromExtension =
   | { type: "mod_delete"; id: string }
   | { type: "mod_set_vars"; id: string; values: Record<string, string> | null }
   | { type: "mod_reveal"; id: string }
-  | { type: "mod_import"; requestId: string; fileName: string; content: string }
+  | { type: "mod_import"; requestId: string; fileName: string; content: string; url?: string }
+  | { type: "mod_update"; id: string }
+  | { type: "mods_check_updates" }
   | { type: "history_list"; tabId: number }
   | { type: "history_restore"; tabId: number; sessionId: string }
   | { type: "auth_start"; agentId: string; methodId: string }

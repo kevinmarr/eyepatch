@@ -103,3 +103,5 @@
 .var-grid input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: var(--r-xs); background: none; }
 .var-actions { display: flex; justify-content: flex-end; }
 @media (max-width: 480px) { .var-grid { grid-template-columns: 1fr; gap: 6px; } }
+.mods-updates { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: var(--fs-ui); }
+.mods-updates .btn.quiet { margin-left: -12px; }

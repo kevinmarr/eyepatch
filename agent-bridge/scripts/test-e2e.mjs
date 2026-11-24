@@ -33,6 +33,8 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures++;
 };
 
+const updScript = (v) =>
+  `// ==UserScript==\n// @name Updatable\n// @version ${v}\n// @updateURL http://127.0.0.1:8123/upd.user.js\n// @match http://127.0.0.1/none\n// @grant none\n// ==/UserScript==\n// v${v}\n`;
 // ---- test pages ----
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, "http://x");
@@ -41,6 +43,7 @@ const server = http.createServer((req, res) => {
     return res.end(`<!doctype html><title>t</title><script>window.appState = 7</script><h1 id="t">Hello</h1><div id="out">out</div>`);
   }
   if (u.pathname === "/lib.js") return res.end("var LIB = 42;");
+  if (u.pathname === "/upd.user.js") return res.end(updScript("2.0"));
   if (u.pathname === "/note.txt") return res.end("a note");
   if (u.pathname === "/inst.user.js") {
     res.setHeader("content-type", "text/javascript");
@@ -270,6 +273,19 @@ await varsPage.locator('[data-do="vars-reset"]').click({ timeout: 5000 }).catch(
 for (let i = 0; i < 40 && (await bg()) !== "rgba(0, 0, 0, 0)"; i++) await page.waitForTimeout(100);
 check("reset to defaults", (await bg()) === "rgba(0, 0, 0, 0)", await bg());
 await varsPage.close();
+
+// Updates: a mod with an @updateURL is offered its newer version in Settings.
+write("upd.user.js", updScript("1.0"));
+const updPage = await ctx.newPage();
+await updPage.goto(`chrome-extension://${id}/options.html`);
+await updPage.locator('[data-do="check-updates"]').click({ timeout: 8000 }).catch(() => {});
+const updBtn = updPage.locator('#mods .row[data-mod="upd.user.js"] [data-do="update"]');
+await updBtn.waitFor({ timeout: 8000 }).catch(() => {});
+check("Settings offers a mod's update", (await updBtn.innerText().catch(() => "")) === "Update to 2.0", await updPage.locator("#mods-updates").innerText().catch(() => ""));
+await updBtn.click({ timeout: 2000 }).catch(() => {});
+for (let i = 0; i < 40 && !fs.readFileSync(path.join(MODS, "upd.user.js"), "utf8").includes("v2.0"); i++) await updPage.waitForTimeout(100);
+check("…and installs it", fs.readFileSync(path.join(MODS, "upd.user.js"), "utf8").includes("// v2.0"));
+await updPage.close();
 
 // Mods keep running with Agent Bridge stopped (and gone, so the extension
 // can't start it again) and the service worker restarted.
