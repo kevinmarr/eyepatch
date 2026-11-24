@@ -17,8 +17,9 @@
 # - The secrets are only in the macos-sign job, which runs no third-party
 #   code: it gets the built executables as artifacts and runs Apple's tools.
 #   Its environment should require approval and allow only v* tags and main.
-# - Every action is pinned to a commit (Dependabot proposes updates), so a
-#   moved tag can't change what runs.
+# - Every action is pinned to a commit, so a moved tag can't change what
+#   runs. Update the pins by hand when a run warns about them (e.g. an old
+#   Node version being retired).
 name: Release
 
 on:

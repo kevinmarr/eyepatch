@@ -324,8 +324,8 @@ The Apple secrets the workflow lists live in a GitHub environment named
 `release` (Settings → Environments), set to require your approval and to
 allow only `v*` tags and `main`, so each run that signs waits for you to
 approve it. Signing happens in its own job, which runs nothing but Apple's
-tools on the built executables. Actions are pinned to commits; Dependabot
-proposes updates.
+tools on the built executables. Actions are pinned to commits; update them
+by hand when a run warns about them.
 
 An extension release that needs the new Agent Bridge sets `BRIDGE_VERSION` to
 it. **Publish the Agent Bridge release before uploading that extension
