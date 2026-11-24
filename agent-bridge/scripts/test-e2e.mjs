@@ -70,8 +70,8 @@ write("gm.user.js", `// ==UserScript==
 // @grant GM_getValue
 // @grant GM_setValue
 // @grant GM_registerMenuCommand
-// @grant GM_download
-// @grant GM.download
+// @grant GM_webRequest
+// @grant GM.webRequest
 // @noframes
 // ==/UserScript==
 const d = document.documentElement.dataset;
@@ -80,8 +80,8 @@ d.info = GM_info.script.name;
 d.page = typeof window.appState;
 d.note = GM_getResourceText("note");
 GM.getResourceUrl("note").then((u) => (d.noteUrl = u.slice(0, 5)));
-try { GM_download("x"); } catch (e) { d.stub = e.message; }
-GM.download("x").catch((e) => (d.asyncStub = e.message));
+try { GM_webRequest([]); } catch (e) { d.stub = e.message; }
+GM.webRequest([]).catch((e) => (d.asyncStub = e.message));
 d.count = GM_getValue("count", 0) + 1;
 GM_setValue("count", Number(d.count));
 GM_registerMenuCommand("Mark it", () => (d.menu = "clicked"));
@@ -151,8 +151,8 @@ check("GM_info", (await ds("info")) === "GM test");
 check("isolated world can't see page globals", (await ds("page")) === "undefined", await ds("page"));
 check("GM_getResourceText", (await ds("note")) === "a note", await ds("note"));
 check("GM.getResourceUrl", (await waitDs("noteUrl")) === "data:", await ds("noteUrl"));
-check("unsupported grant stub", /GM_download isn't supported/.test((await ds("stub")) ?? ""), await ds("stub"));
-check("unsupported GM.* stub rejects", /GM\.download isn't supported/.test((await waitDs("asyncStub")) ?? ""), await ds("asyncStub"));
+check("unsupported grant stub", /GM_webRequest isn't supported/.test((await ds("stub")) ?? ""), await ds("stub"));
+check("unsupported GM.* stub rejects", /GM\.webRequest isn't supported/.test((await waitDs("asyncStub")) ?? ""), await ds("asyncStub"));
 check("GM storage", (await ds("count")) === "1", await ds("count"));
 check("GM_addStyle", (await color("#out")) === "rgb(0, 128, 0)", await color("#out"));
 check("@grant none runs in the page", (await ds("app")) === "7" && (await page.evaluate(() => window.fromMod)) === "hi", await ds("app"));
