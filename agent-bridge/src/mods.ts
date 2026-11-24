@@ -18,19 +18,36 @@ const ID_RE = /^[a-z0-9][a-z0-9._-]*\.user\.(js|css)$/i;
 // Kept outside the mod files so toggling never rewrites a script and doesn't
 // travel with it when it's shared.
 
-type State = { disabled: string[] };
+// UserCSS @var values the user changed live here too, so the file keeps its defaults.
+
+type State = { disabled: string[]; vars: Record<string, Record<string, string>> };
 
 async function readState(): Promise<State> {
   try {
     const s = JSON.parse(await fsp.readFile(STATE_FILE, "utf8"));
-    return { disabled: Array.isArray(s.disabled) ? s.disabled.filter((x: unknown) => typeof x === "string") : [] };
+    const vars: State["vars"] = {};
+    for (const [id, v] of Object.entries(s.vars ?? {})) {
+      if (!v || typeof v !== "object") continue;
+      vars[id] = Object.fromEntries(Object.entries(v as object).filter(([, x]) => typeof x === "string"));
+    }
+    return { disabled: Array.isArray(s.disabled) ? s.disabled.filter((x: unknown) => typeof x === "string") : [], vars };
   } catch {
-    return { disabled: [] };
+    return { disabled: [], vars: {} };
   }
 }
 
 async function writeState(state: State) {
-  await fsp.writeFile(STATE_FILE, JSON.stringify({ disabled: [...new Set(state.disabled)].sort() }, null, 2) + "\n");
+  const vars = Object.fromEntries(Object.entries(state.vars).filter(([, v]) => Object.keys(v).length));
+  await fsp.writeFile(STATE_FILE, JSON.stringify({ disabled: [...new Set(state.disabled)].sort(), ...(Object.keys(vars).length ? { vars } : {}) }, null, 2) + "\n");
+}
+
+/** Set a UserCSS mod's @var values (by name); null resets them all to the file's defaults. */
+export async function setModVars(id: string, values: Record<string, string> | null) {
+  modPath(id);
+  const state = await readState();
+  if (values) state.vars[id] = { ...state.vars[id], ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])) };
+  else delete state.vars[id];
+  await writeState(state);
 }
 
 export async function setModEnabled(id: string, enabled: boolean) {
@@ -55,12 +72,12 @@ function modPath(id: string) {
 export async function loadMods({ assets = false } = {}): Promise<Mod[]> {
   const entries = await fsp.readdir(MODS_DIR, { withFileTypes: true });
   const ids = entries.filter((e) => e.isFile() && ID_RE.test(e.name)).map((e) => e.name).sort();
-  const { disabled } = await readState();
+  const { disabled, vars } = await readState();
   return Promise.all(
     ids.map(async (id): Promise<Mod> => {
       let mod: Mod;
       try {
-        mod = { ...parseModFile(id, await fsp.readFile(path.join(MODS_DIR, id), "utf8")), enabled: !disabled.includes(id) };
+        mod = { ...parseModFile(id, await fsp.readFile(path.join(MODS_DIR, id), "utf8"), vars[id]), enabled: !disabled.includes(id) };
       } catch (e) {
         return { id, kind: id.endsWith(CSS_EXT) ? "css" : "js", name: id, sites: [], enabled: false, matches: [], excludeMatches: [], runAt: "document_idle", world: "isolated", allFrames: false, error: (e as Error).message };
       }
@@ -147,7 +164,10 @@ export async function deleteMod(id: string) {
   const ext = id.endsWith(CSS_EXT) ? CSS_EXT : JS_EXT;
   await fsp.rename(file, path.join(TRASH_DIR, `${id.slice(0, -ext.length)}-${Date.now()}${ext}`));
   const state = await readState();
-  if (state.disabled.includes(id)) await writeState({ disabled: state.disabled.filter((d) => d !== id) });
+  if (state.disabled.includes(id) || state.vars[id]) {
+    delete state.vars[id];
+    await writeState({ ...state, disabled: state.disabled.filter((d) => d !== id) });
+  }
 }
 
 const slug = (s: string) =>
@@ -244,7 +264,10 @@ The file name is the mod's id: lowercase, dash-separated, e.g.
   \`url("https://example.com/exact")\`, \`regexp("https://example\\\\.com/[0-9]+")\`
   (must match the whole URL; backslashes doubled, as in any CSS string).
 - No preprocessors (\`@preprocessor stylus\`/\`less\`): plain CSS only. \`@var\`
-  lines become CSS custom properties with their default value.
+  lines (\`@var color accent "Accent color" #1a73e8\`; also text, checkbox,
+  number, range, select) become CSS custom properties (\`var(--accent)\`), and
+  the user can change their values in Settings: use them for anything worth
+  adjusting.
 - Styles apply at document start and are hot-swapped in open tabs as you save.
 
 ## Userscripts (\`.user.js\`)

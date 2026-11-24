@@ -245,6 +245,32 @@ for (let i = 0; i < 50; i++) {
 }
 check("script change reloads the tab", changedVal === "changed" && (await page.evaluate(() => window.marker)) === undefined, changedVal);
 
+// UserCSS @var: changed in Settings, the style hot-swaps with the new value.
+write("vars.user.css", `/* ==UserStyle==
+@name Vars
+@var select bg "Background" ["none:None*|transparent", "green:Green|rgb(0, 128, 0)"]
+==/UserStyle== */
+@-moz-document domain("127.0.0.1") {
+  h1 { background-color: var(--bg); }
+}
+`);
+const bg = () => page.evaluate(() => getComputedStyle(document.querySelector("h1")).backgroundColor);
+for (let i = 0; i < 40 && (await bg()) !== "rgba(0, 0, 0, 0)"; i++) await page.waitForTimeout(100);
+const varsPage = await ctx.newPage();
+await varsPage.goto(`chrome-extension://${id}/options.html`);
+const varsRow = varsPage.locator('#mods .row[data-mod="vars.user.css"]');
+await varsRow.waitFor({ timeout: 5000 }).catch(() => {});
+await varsRow.locator('[data-do="vars"]').click({ timeout: 5000 }).catch(() => {});
+await varsPage.locator('.vars select[data-var="bg"]').selectOption("rgb(0, 128, 0)", { timeout: 5000 }).catch(() => {});
+for (let i = 0; i < 40 && (await bg()) !== "rgb(0, 128, 0)"; i++) await page.waitForTimeout(100);
+check("@var changed in Settings applies", (await bg()) === "rgb(0, 128, 0)", await bg());
+check("…without a reload", (await page.evaluate(() => window.marker)) === undefined && (await page.evaluate(() => window.fromMod)) === "changed");
+check("@var value stored outside the file", JSON.parse(fs.readFileSync(path.join(HOME, "mods-state.json"), "utf8")).vars?.["vars.user.css"]?.bg === "rgb(0, 128, 0)");
+await varsPage.locator('[data-do="vars-reset"]').click({ timeout: 5000 }).catch(() => {});
+for (let i = 0; i < 40 && (await bg()) !== "rgba(0, 0, 0, 0)"; i++) await page.waitForTimeout(100);
+check("reset to defaults", (await bg()) === "rgba(0, 0, 0, 0)", await bg());
+await varsPage.close();
+
 // Mods keep running with Agent Bridge stopped (and gone, so the extension
 // can't start it again) and the service worker restarted.
 fs.rmSync(HOSTS, { recursive: true, force: true });

@@ -2,7 +2,7 @@ import { AgentManager } from "./agents.ts";
 import { Chats } from "./chats.ts";
 import { EXTENSION_DIR } from "./config.ts";
 import { Extension } from "./extension.ts";
-import { deleteMod, ensureModsDir, importMod, loadMods, revealMod, setModEnabled, watchDir, watchMods } from "./mods.ts";
+import { deleteMod, ensureModsDir, importMod, loadMods, revealMod, setModEnabled, setModVars, watchDir, watchMods } from "./mods.ts";
 import { ToolServer } from "./tools.ts";
 import { cleanUpAfterUpdate, selfUpdate } from "./update.ts";
 
@@ -59,6 +59,8 @@ export async function startBridge({ dev }: { dev: boolean }) {
     // From the side panel or Options page. The on/off state isn't in the mod's
     // file, so apply it here; the mods watcher applies the rest.
     if (msg.type === "mod_set_enabled") setModEnabled(msg.id, msg.enabled).then(() => pushMods([msg.id]), fail(msg.id));
+    // UserCSS @var values from Settings; styles hot-swap.
+    if (msg.type === "mod_set_vars") setModVars(msg.id, msg.values).then(() => pushMods([msg.id]), fail(msg.id));
     if (msg.type === "mod_delete") deleteMod(msg.id).catch(fail(msg.id));
     if (msg.type === "mod_reveal") revealMod(msg.id).catch(fail(msg.id));
     if (msg.type === "mod_import") {

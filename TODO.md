@@ -60,8 +60,9 @@ the side panel, or not at all:
   `GM_cookie` use optional permissions that Settings asks for on the mod's
   row; the GM suite runs with them pre-granted, so check the "Allow
   downloads" button and the not-yet-allowed error by hand.
-- **UserCSS:** `@var` values are fixed at their defaults. Settings could let
-  you change them. Preprocessors (Stylus, Less) aren't supported.
+- **UserCSS:** preprocessors (Stylus, Less) aren't supported. `@var` values
+  are editable in Settings (kept in `mods-state.json`); `test:e2e` covers a
+  select, the other controls were only checked with `options.html?demo`.
 
 ## 5. Chrome Web Store
 

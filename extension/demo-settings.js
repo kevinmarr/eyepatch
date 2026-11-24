@@ -45,7 +45,13 @@ const full = {
     opencode: { agent: "OpenCode", state: "authenticated", accounts: [{ label: "OpenRouter API key" }], methods: [], restartPending: true },
   },
   mods: [
-    { id: "substack-readable-toc.user.css", sites: ["substack.com"], name: "Substack: legible table of contents", description: "Moves the contents into the margin and highlights the current section", enabled: true, matches: ["*://*.substack.com/*"] },
+    { id: "substack-readable-toc.user.css", sites: ["substack.com"], name: "Substack: legible table of contents", description: "Moves the contents into the margin and highlights the current section", enabled: true, vars: [
+      { name: "accent", type: "color", label: "Highlight color", default: "#1a73e8", value: "#d93025" },
+      { name: "width", type: "range", label: "Margin width", default: "240", min: 160, max: 360, step: 10, unit: "px" },
+      { name: "side", type: "select", label: "Side", default: "left", options: [{ label: "Left", value: "left" }, { label: "Right", value: "right" }] },
+      { name: "numbers", type: "checkbox", label: "Number sections", default: "1" },
+      { name: "font", type: "text", label: "Font", default: "inherit" },
+    ], matches: ["*://*.substack.com/*"] },
     { id: "substack-hide-subscribe.user.css", sites: ["substack.com"], name: "Hide in-article subscribe prompts", description: "Removes the subscribe boxes between paragraphs", enabled: false, matches: ["*://*.substack.com/*"] },
     { id: "kl-wine-searcher.user.js", sites: ["klwines.com"], name: "K&L: Wine-Searcher links", description: "Adds a Wine-Searcher link after each bottle", enabled: true, grants: ["xmlhttpRequest", "download"], matches: ["*://www.klwines.com/*"] },
     { id: "dark-mode.user.css", sites: ["news.ycombinator.com", "wikipedia.org", "craigslist.org", "old.reddit.com", "lobste.rs"], name: "Dark mode", description: "Dark colors on sites that don't have their own", enabled: true, matches: ["*://news.ycombinator.com/*"] },

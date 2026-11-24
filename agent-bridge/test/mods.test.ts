@@ -223,6 +223,30 @@ test("@var defaults become custom properties", () => {
   assert.match(css, /--theme: #000;/);
 });
 
+test("@var values the user set replace the defaults, if valid", () => {
+  const src = usercss(`a { color: var(--accent) }`, `@name V
+@var color accent "Accent color" #ff0000
+@var range size "Size" [12, 8, 20, 1, "px"]
+@var select theme "Theme" ["light:Light|#fff", "dark:Dark*|#000"]
+@var text font "Font" "serif"`);
+  const m = parseUserCss("d.user.css", src, { accent: "#00ff00", size: "14", theme: "#fff", font: "x; } body { display: none" });
+  const css = m.sections![0].css;
+  assert.match(css, /--accent: #00ff00;/);
+  assert.match(css, /--size: 14px;/);
+  assert.match(css, /--theme: #fff;/);
+  assert.match(css, /--font: serif;/); // can't break out of the declaration
+  const vars = m.vars!;
+  assert.deepEqual(vars.map((v) => [v.name, v.type, v.label, v.default, v.value]), [
+    ["accent", "color", "Accent color", "#ff0000", "#00ff00"],
+    ["size", "range", "Size", "12", "14"],
+    ["theme", "select", "Theme", "#000", "#fff"],
+    ["font", "text", "Font", "serif", "x; } body { display: none"],
+  ]);
+  assert.deepEqual(vars[1], { ...vars[1], min: 8, max: 20, step: 1, unit: "px" });
+  assert.deepEqual(vars[2].options, [{ label: "Light", value: "#fff" }, { label: "Dark", value: "#000" }]);
+  assert.equal(parseUserCss("d.user.css", src, { theme: "#123" }).sections![0].css.match(/--theme: [^;]*/)![0], "--theme: #000");
+});
+
 test("preprocessors aren't supported", () => {
   assert.match(parseUserCss("d.user.css", usercss(`a{}`, "@name P\n@preprocessor stylus")).error ?? "", /stylus/);
   assert.match(parseUserCss("d.user.css", `a{}`).error ?? "", /header/);

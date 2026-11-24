@@ -522,6 +522,7 @@ function sitesIcon(sites) {
 const siteList = (sites, n = 2) => sites.slice(0, n).join(", ") + (sites.length > n ? ` and ${sites.length - n} more` : "");
 
 let modsKey = "";
+let editingVars = null; // the UserCSS mod whose @var settings are open
 
 // GM_download and GM_cookie need permissions Eyepatch asks for only when a
 // mod uses them: the mod's row offers them (Chrome wants a click to ask).
@@ -551,7 +552,10 @@ function renderMods(s) {
     modFromLink = null;
     clearTimeout(modLinkTimer);
   }
-  const key = JSON.stringify([mods, confirming, currentMod, [...permitted]]);
+  // While a mod's settings are open, its own values changing doesn't rebuild
+  // the list (the controls already show them, and a slider keeps its drag).
+  const keyed = mods.map((m) => (m.id === editingVars ? { ...m, vars: m.vars?.map(({ value, ...v }) => v) } : m));
+  const key = JSON.stringify([keyed, confirming, currentMod, [...permitted], editingVars]);
   if (key === modsKey) return arrived && showCurrentMod();
   modsKey = key;
   const bySite = new Map();
@@ -579,8 +583,12 @@ function renderMods(s) {
               `</div>` +
               missingPermissions(m).map((o) => `<button type="button" class="btn" data-do="permit" data-permission="${o.permission}">${o.label}</button>`).join("") +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
+              (m.vars?.length && !m.error
+                ? `<button type="button" class="icon-btn lg" data-do="vars" aria-label="Settings for ${esc(m.name)}" aria-expanded="${editingVars === m.id}" title="Settings">${icon(editingVars === m.id ? "x" : "sliders-horizontal")}</button>`
+                : "") +
               `<button type="button" class="icon-btn lg" data-do="reveal" aria-label="Show ${esc(m.name)} in its folder" title="Show in folder">${icon("folder-open")}</button>` +
-              `<button type="button" class="icon-btn lg" data-do="ask-delete" aria-label="Delete ${esc(m.name)}" title="Delete">${icon("trash-2")}</button></div>`,
+              `<button type="button" class="icon-btn lg" data-do="ask-delete" aria-label="Delete ${esc(m.name)}" title="Delete">${icon("trash-2")}</button></div>` +
+              (editingVars === m.id && m.vars?.length ? varsBox(m) : ""),
         )
         .join("");
       return `<div class="mod-group">${title}<div class="group-items">${rows}</div></div>`;
@@ -588,6 +596,70 @@ function renderMods(s) {
     .join("");
   if (arrived) showCurrentMod();
 }
+
+/** A UserCSS mod's @var settings, in an inset box under its row. */
+function varsBox(m) {
+  const fields = m.vars
+    .map((v, i) => {
+      const value = v.value ?? v.default;
+      const id = `var-${i}`;
+      const attrs = `id="${id}" data-var="${esc(v.name)}"`;
+      let control;
+      switch (v.type) {
+        case "checkbox":
+          control = `<button type="button" class="switch" role="switch" aria-checked="${value === "1"}" ${attrs} aria-label="${esc(v.label)}"></button>`;
+          break;
+        case "select":
+          control = `<select class="field" ${attrs}>${v.options.map((o) => `<option value="${esc(o.value)}"${o.value === value ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+          break;
+        case "range":
+          control =
+            `<span class="range"><input type="range" ${attrs} value="${esc(value)}"${v.min != null ? ` min="${v.min}"` : ""}${v.max != null ? ` max="${v.max}"` : ""}${v.step != null ? ` step="${v.step}"` : ""} />` +
+            `<output for="${id}">${esc(value)}${esc(v.unit ?? "")}</output></span>`;
+          break;
+        case "number":
+          control =
+            `<span class="number"><input type="number" class="field" ${attrs} value="${esc(value)}"${v.min != null ? ` min="${v.min}"` : ""}${v.max != null ? ` max="${v.max}"` : ""}${v.step != null ? ` step="${v.step}"` : ""} />` +
+            (v.unit ? `<span class="muted">${esc(v.unit)}</span>` : "") +
+            `</span>`;
+          break;
+        case "color":
+          // <input type=color> only takes #rrggbb; other colors are typed.
+          control = /^#[0-9a-f]{6}$/i.test(value)
+            ? `<span class="color"><input type="color" ${attrs} value="${esc(value)}" /><code>${esc(value)}</code></span>`
+            : `<input class="field mono" ${attrs} value="${esc(value)}" spellcheck="false" />`;
+          break;
+        default:
+          control = `<input class="field" ${attrs} value="${esc(value)}" spellcheck="false" />`;
+      }
+      return `<label class="var-label" for="${id}">${esc(v.label)}</label>${control}`;
+    })
+    .join("");
+  // Always there: the box isn't rebuilt while you change values (see renderMods).
+  return (
+    `<div class="inset-box vars" data-mod="${esc(m.id)}"><div class="var-grid">${fields}</div>` +
+    `<div class="var-actions"><button type="button" class="btn quiet" data-do="vars-reset">Reset to defaults</button></div>` +
+    `</div>`
+  );
+}
+
+let varTimer;
+/** Send a changed @var value; typing and dragging are sent once they pause. */
+function setVar(id, name, value, wait = 0) {
+  clearTimeout(varTimer);
+  varTimer = setTimeout(() => post({ type: "mod_set_vars", id, values: { [name]: value } }), wait);
+}
+
+$("mods").addEventListener("input", (e) => {
+  const el = e.target.closest("[data-var]");
+  const id = e.target.closest(".vars")?.dataset.mod;
+  if (!el || !id) return;
+  const v = state.mods.find((m) => m.id === id)?.vars?.find((x) => x.name === el.dataset.var);
+  if (el.type === "range") el.nextElementSibling.textContent = el.value + (v?.unit ?? "");
+  if (el.type === "color") el.nextElementSibling.textContent = el.value;
+  if (el.type === "number" && el.value === "") return;
+  setVar(id, el.dataset.var, el.value, el.tagName === "SELECT" ? 0 : 250);
+});
 
 /** Bring the linked mod into view and focus; it's let go on the next click or key. */
 function showCurrentMod() {
@@ -613,6 +685,12 @@ function releaseCurrentMod() {
 $("mods").addEventListener("click", (e) => {
   const what = e.target.closest("[data-do]")?.dataset.do;
   const id = e.target.closest("[data-mod]")?.dataset.mod;
+  const sw = e.target.closest("[data-var][role=switch]");
+  if (sw && id) {
+    const on = sw.getAttribute("aria-checked") !== "true";
+    sw.setAttribute("aria-checked", String(on));
+    return setVar(id, sw.dataset.var, on ? "1" : "0");
+  }
   if (!what || !id) return;
   if (what === "toggle") {
     const sw = e.target.closest("[data-do=toggle]");
@@ -621,6 +699,13 @@ $("mods").addEventListener("click", (e) => {
     return post({ type: "mod_set_enabled", id, enabled });
   }
   if (what === "reveal") return post({ type: "mod_reveal", id });
+  if (what === "vars") editingVars = editingVars === id ? null : id;
+  else if (what === "vars-reset") {
+    post({ type: "mod_set_vars", id, values: null });
+    modsKey = ""; // show the defaults once they're back
+    return;
+  }
+
   if (what === "permit") {
     const permission = e.target.closest("[data-permission]").dataset.permission;
     if (DEMO) return console.log("request", permission);

@@ -25,6 +25,7 @@ export type FromExtension =
   | { type: "sync_mods" }
   | { type: "mod_set_enabled"; id: string; enabled: boolean }
   | { type: "mod_delete"; id: string }
+  | { type: "mod_set_vars"; id: string; values: Record<string, string> | null }
   | { type: "mod_reveal"; id: string }
   | { type: "mod_import"; requestId: string; fileName: string; content: string }
   | { type: "history_list"; tabId: number }

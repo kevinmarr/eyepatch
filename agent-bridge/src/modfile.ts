@@ -54,6 +54,8 @@ export type Mod = {
 
   // .user.css
   sections?: { css: string; rules: ModRule[] }[];
+  /** Its @var settings, for Settings to show. */
+  vars?: ModVar[];
 };
 
 export const JS_EXT = ".user.js";
@@ -438,27 +440,42 @@ const unquote = (s: string) => {
   return /^(["']).*\1$/s.test(t) ? t.slice(1, -1) : t;
 };
 
-/** A `@var` default as a CSS custom property, or null if it can't be read. */
-function varDeclaration(value: string): string | null {
+/** A UserCSS `@var`, as Settings shows it. */
+export type ModVar = {
+  name: string;
+  type: "text" | "color" | "checkbox" | "number" | "range" | "select";
+  label: string;
+  default: string;
+  /** The user's value, when they changed it. */
+  value?: string;
+  /** For select: each choice's label and value. */
+  options?: { label: string; value: string }[];
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+};
+
+/** A `@var` line (`type name "label" default`), or null if it can't be read. */
+export function parseVar(value: string): ModVar | null {
   const m = /^(\S+)\s+(\S+)\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)\s+([\s\S]*)$/.exec(value.trim());
   if (!m) return null;
-  const [, type, name, , raw] = m;
-  let v: string;
+  const [, rawType, name, rawLabel, raw] = m;
+  const label = unquote(rawLabel);
   try {
-    switch (type) {
+    switch (rawType) {
       case "text":
       case "color":
-        v = unquote(raw);
-        break;
+        return { name, type: rawType, label, default: unquote(raw) };
       case "checkbox":
-        v = unquote(raw) === "1" ? "1" : "0";
-        break;
+        return { name, type: "checkbox", label, default: unquote(raw) === "1" ? "1" : "0" };
       case "number":
       case "range": {
         const parsed = raw.trim().startsWith("[") ? (looseJson(raw) as unknown[]) : [raw.trim()];
-        const unit = parsed.find((x, i) => i > 0 && typeof x === "string" && !/^[\d.-]+$/.test(x)) ?? "";
-        v = `${parsed[0]}${unit}`;
-        break;
+        const unit = (parsed.find((x, i) => i > 0 && typeof x === "string" && !/^[\d.-]+$/.test(x)) as string | undefined) ?? "";
+        const nums = parsed.slice(1).filter((x) => typeof x === "number" || (typeof x === "string" && /^-?[\d.]+$/.test(x))).map(Number);
+        const [min, max, step] = [nums[0], nums[1], nums[2]];
+        return { name, type: rawType, label, default: String(parsed[0]), unit, ...(min != null && { min }), ...(max != null && { max }), ...(step != null && { step }) };
       }
       case "select":
       case "dropdown":
@@ -467,25 +484,37 @@ function varDeclaration(value: string): string | null {
         const pairs: [string, string][] = Array.isArray(opts)
           ? opts.map((o) => {
               const s = String(o);
-              const [label, val] = s.includes("|") ? s.split("|") : [s, s.replace(/\*$/, "")];
-              return [label, val.replace(/^[^:]*:/, (p) => (s.includes("|") ? "" : p))];
+              const [lbl, val] = s.includes("|") ? s.split("|") : [s, s.replace(/\*$/, "")];
+              return [lbl, val.replace(/^[^:]*:/, (p) => (s.includes("|") ? "" : p))];
             })
           : Object.entries(opts as Record<string, unknown>).map(([k, val]) => [k, String(val)]);
-        const chosen = pairs.find(([label]) => label.endsWith("*")) ?? pairs[0];
+        const chosen = pairs.find(([l]) => l.endsWith("*")) ?? pairs[0];
         if (!chosen) return null;
-        v = chosen[1];
-        break;
+        const options = pairs.map(([l, v]) => ({ label: l.replace(/\*$/, "").replace(/^[^:]*:/, ""), value: v }));
+        return { name, type: "select", label, default: chosen[1], options };
       }
-      default:
-        return null;
     }
-  } catch {
-    return null;
-  }
-  return `--${name}: ${v};`;
+  } catch {}
+  return null;
 }
 
-export function parseUserCss(id: string, src: string): Omit<Mod, "enabled"> {
+/** A `@var` as a CSS custom property, with the user's value if it's a valid one. */
+function varDeclaration(v: ModVar, override?: string): string {
+  let value = v.default;
+  if (override != null) {
+    const ok =
+      v.type === "select" ? Boolean(v.options?.some((o) => o.value === override))
+        : v.type === "checkbox" ? override === "0" || override === "1"
+          : v.type === "number" || v.type === "range" ? /^-?\d*\.?\d+$/.test(override)
+            : !/[;{}]/.test(override); // text and color can't end the declaration
+    if (ok) value = override;
+  }
+  const unit = v.type === "number" || v.type === "range" ? (v.unit ?? "") : "";
+  return `--${v.name}: ${value}${unit};`;
+}
+
+/** `values`: the user's @var values, by name (see setModVars). */
+export function parseUserCss(id: string, src: string, values: Record<string, string> = {}): Omit<Mod, "enabled"> {
   const base: Omit<Mod, "enabled"> = {
     id, kind: "css", name: baseName(id), sites: [], matches: [], excludeMatches: [],
     runAt: "document_start", world: "isolated", allFrames: true,
@@ -499,10 +528,15 @@ export function parseUserCss(id: string, src: string): Omit<Mod, "enabled"> {
 
   const warnings: string[] = [];
   const vars: string[] = [];
-  for (const v of all(meta, "var")) {
-    const decl = varDeclaration(v);
-    if (decl) vars.push(decl);
-    else warnings.push(`couldn't read @var ${v.split(/\s+/)[1] ?? v}`);
+  const modVars: ModVar[] = [];
+  for (const line of all(meta, "var")) {
+    const v = parseVar(line);
+    if (!v) {
+      warnings.push(`couldn't read @var ${line.split(/\s+/)[1] ?? line}`);
+      continue;
+    }
+    vars.push(varDeclaration(v, values[v.name]));
+    modVars.push(values[v.name] != null ? { ...v, value: values[v.name] } : v);
   }
   if (meta.entries.some(([k]) => k === "advanced")) warnings.push("@advanced isn't supported; use @var");
 
@@ -518,12 +552,13 @@ export function parseUserCss(id: string, src: string): Omit<Mod, "enabled"> {
     excludeMatches: [],
     filter: { any, none: [] },
     sections,
+    vars: modVars.length ? modVars : undefined,
     warnings: warnings.length ? warnings : undefined,
   };
   if (!sections.length) return { ...mod, error: "has no CSS" };
   return mod;
 }
 
-export function parseModFile(id: string, src: string): Omit<Mod, "enabled"> {
-  return id.endsWith(CSS_EXT) ? parseUserCss(id, src) : parseUserScript(id, src);
+export function parseModFile(id: string, src: string, vars?: Record<string, string>): Omit<Mod, "enabled"> {
+  return id.endsWith(CSS_EXT) ? parseUserCss(id, src, vars) : parseUserScript(id, src);
 }
