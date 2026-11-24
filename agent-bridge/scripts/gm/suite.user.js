@@ -171,6 +171,11 @@
     const { kind, r } = await xhr({ url: `${OTHER}/redirect?to=${encodeURIComponent(`${BLOCKED}/echo`)}` });
     return { kind, status: r.status };
   });
+  await test("xhr: headers fetch won't send (Referer, User-Agent, Cookie)", async () => {
+    const r = await GM.xmlHttpRequest({ url: `${ORIGIN}/echo`, headers: { Referer: "http://example.test/from", "User-Agent": "SuiteAgent/1", Cookie: "suite=1" }, anonymous: true });
+    const h = JSON.parse(r.responseText).headers;
+    return [h.referer, h["user-agent"], h.cookie];
+  });
   await test("xhr: POST string body and headers", async () => {
     const { r } = await xhr({ method: "POST", url: `${OTHER}/echo`, data: "hello", headers: { "X-Test": "yes", "Content-Type": "text/plain" } });
     const e = echo(r);

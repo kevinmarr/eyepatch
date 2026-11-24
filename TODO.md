@@ -52,8 +52,10 @@ the side panel, or not at all:
 - **`unsafeWindow`** in isolated scripts is a bridge to the page's `window`
   (`extension/unsafe-window.js`). Untested with real-world scripts (e.g. ones
   that hook page functions heavily); each access is a synchronous round trip.
-- **More of the GM API:** `GM_webRequest`; forbidden request headers in `GM_xmlhttpRequest` (needs
-  `declarativeNetRequest`). `GM_notification`'s `onclick` is untested (the GM
+- **More of the GM API:** `GM_webRequest`. Forbidden headers in
+  `GM_xmlhttpRequest` (Cookie, Referer, User-Agent...) are set with a
+  declarativeNetRequest session rule; they aren't reapplied after a redirect.
+  `GM_notification`'s `onclick` is untested (the GM
   suite can't click a notification); `ondone` is covered. `GM_download` and
   `GM_cookie` use optional permissions that Settings asks for on the mod's
   row; the GM suite runs with them pre-granted, so check the "Allow

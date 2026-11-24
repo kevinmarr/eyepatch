@@ -565,6 +565,67 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
     return undefined;
   }
 
+  // ---------- headers fetch won't send ----------
+  // fetch drops forbidden headers (Cookie, Referer, User-Agent, Origin...)
+  // that userscripts set. A declarativeNetRequest session rule sets them on
+  // the extension's own request to that URL while it's in flight. Requests
+  // to the same URL that set such headers wait for each other.
+
+  // Transport-level ones stay the browser's.
+  const UNSETTABLE = new Set(["host", "content-length", "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "expect"]);
+  const FORBIDDEN = new Set(["accept-charset", "accept-encoding", "cookie", "cookie2", "date", "dnt", "origin", "referer", "user-agent", "via"]);
+  const needsRule = (name) => {
+    const n = name.toLowerCase();
+    return !UNSETTABLE.has(n) && (FORBIDDEN.has(n) || n.startsWith("sec-") || n.startsWith("proxy-") || n.startsWith("access-control-request-"));
+  };
+  const RULE_BASE = 100_000; // dynamic rule 1 is the install redirect (background.js)
+  let ruleSeq = 0;
+  const urlLocks = new Map(); // url -> promise of the request holding its rule
+
+  /** Run `fn` with `headers` set on requests to `url`; resolves with fn's result. */
+  async function withHeaderRule(url, method, headers, fn) {
+    if (!headers.length) return fn();
+    const prev = urlLocks.get(url) ?? Promise.resolve();
+    let release;
+    const mine = new Promise((r) => (release = r));
+    urlLocks.set(url, prev.then(() => mine));
+    await prev;
+    const id = RULE_BASE + (ruleSeq = (ruleSeq + 1) % 100_000);
+    const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: [id],
+        addRules: [
+          {
+            id,
+            priority: 1,
+            action: { type: "modifyHeaders", requestHeaders: headers.map(([header, value]) => ({ header, operation: "set", value: String(value) })) },
+            condition: {
+              regexFilter: `^${escaped}$`,
+              resourceTypes: ["xmlhttprequest", "other"],
+              requestMethods: [method.toLowerCase()],
+              tabIds: [chrome.tabs.TAB_ID_NONE],
+              initiatorDomains: [chrome.runtime.id],
+            },
+          },
+        ],
+      });
+      return await fn();
+    } finally {
+      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [id] }).catch(() => {});
+      release();
+      if (urlLocks.get(url) === mine) urlLocks.delete(url);
+    }
+  }
+  // Rules left by a service worker that stopped mid-request.
+  chrome.declarativeNetRequest
+    .getSessionRules()
+    .then((rules) => {
+      const ids = rules.filter((r) => r.id >= RULE_BASE).map((r) => r.id);
+      if (ids.length) return chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
+    })
+    .catch(() => {});
+
   /** chrome.runtime.onUserScriptConnect, for "gm-xhr" ports: one request each. */
   function onConnect(port) {
     if (port.name === "gm-download") return onDownloadConnect(port);
@@ -589,7 +650,12 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
         if (!/^https?:$/.test(url.protocol)) throw new Error(`only http and https URLs, not ${url.protocol}`);
         if (!connectAllowed(mod, url, port.sender?.url)) throw new Error(`blocked: add "// @connect ${url.hostname}" to the script's header`);
         const headers = new Headers();
+        const ruled = [];
         for (const [k, v] of Object.entries(req.headers ?? {})) {
+          if (needsRule(k)) {
+            ruled.push([k, v]);
+            continue;
+          }
           try {
             headers.set(k, String(v));
           } catch {}
@@ -598,15 +664,17 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
         const timer = req.timeout > 0 ? setTimeout(() => ((timedOut = true), controller.abort()), req.timeout) : null;
         // The cookies sent are the target site's, as in other userscript
         // managers (anonymous: true sends none); @connect limits the sites.
-        const res = await fetch(url, {
-          method: req.method,
-          headers,
-          body,
-          credentials: req.anonymous ? "omit" : "include",
-          redirect: req.redirect === "manual" || req.redirect === "error" ? req.redirect : "follow",
-          cache: req.nocache ? "no-store" : "default",
-          signal: controller.signal,
-        });
+        const res = await withHeaderRule(url.href, req.method, ruled, () =>
+          fetch(url, {
+            method: req.method,
+            headers,
+            body,
+            credentials: req.anonymous ? "omit" : "include",
+            redirect: req.redirect === "manual" || req.redirect === "error" ? req.redirect : "follow",
+            cache: req.nocache ? "no-store" : "default",
+            signal: controller.signal,
+          }),
+        );
         // Redirects are followed by fetch; a script can't read a response
         // from a site its @connect doesn't allow.
         const finalUrl = new URL(res.url || url);

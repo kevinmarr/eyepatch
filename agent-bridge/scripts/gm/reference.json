@@ -259,6 +259,11 @@
       "done"
     ],
     "download a URL": "loaded",
-    "download a Blob URL": "loaded"
+    "download a Blob URL": "loaded",
+    "xhr: headers fetch won't send (Referer, User-Agent, Cookie)": [
+      "http://example.test/from",
+      "SuiteAgent/1",
+      "suite=1"
+    ]
   }
 }
