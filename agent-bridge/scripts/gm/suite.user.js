@@ -35,6 +35,9 @@
 // @grant        GM_getTabs
 // @grant        GM.getTab
 // @grant        GM_notification
+// @grant        GM_download
+// @grant        GM.download
+// @grant        GM_cookie
 // @noframes
 // ==/UserScript==
 
@@ -317,6 +320,25 @@
     n.remove();
     return [typeof n.remove, await Promise.race([ended, new Promise((r) => setTimeout(() => r("no ondone"), 3000))])];
   });
+
+  await test("download a URL", () =>
+    new Promise((resolve) => {
+      GM_download({ url: `${ORIGIN}/note.txt`, name: "eyepatch-suite/note.txt", onload: () => resolve("loaded"), onerror: (e) => resolve({ error: e.error }) });
+    }));
+  await test("download a Blob URL", async () => {
+    const url = URL.createObjectURL(new Blob(["made here"], { type: "text/plain" }));
+    await GM.download({ url, name: "eyepatch-suite/blob.txt" });
+    return "loaded";
+  });
+  await test("cookie: set, list, delete", async () => {
+    const list = () => new Promise((r) => GM_cookie.list({ name: "gmsuite" }, (cookies, err) => r(err ? { err } : cookies.map((c) => c.value))));
+    await new Promise((r) => GM_cookie.set({ name: "gmsuite", value: "v1" }, (_, err) => r(err)));
+    const before = await list();
+    await new Promise((r) => GM_cookie.delete({ name: "gmsuite" }, (_, err) => r(err)));
+    return [before, await list()];
+  });
+  await test("cookie: other sites need @connect", () =>
+    new Promise((r) => GM_cookie.list({ url: `${BLOCKED}/` }, (cookies, err) => r(err ? "blocked" : cookies))));
 
   // suite.html sets window.appState = 7 in the page.
   await test("unsafeWindow reads page globals", () => unsafeWindow.appState);

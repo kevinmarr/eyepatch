@@ -257,6 +257,8 @@
     "notification: remove calls ondone": [
       "function",
       "done"
-    ]
+    ],
+    "download a URL": "loaded",
+    "download a Blob URL": "loaded"
   }
 }

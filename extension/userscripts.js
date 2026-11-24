@@ -69,7 +69,7 @@ const GM_NAMES = [
   "GM_addStyle", "GM_addElement", "GM_getResourceText", "GM_getResourceURL",
   "GM_xmlhttpRequest", "GM_openInTab", "GM_notification", "GM_setClipboard",
   "GM_registerMenuCommand", "GM_unregisterMenuCommand", "GM_log",
-  "GM_getTab", "GM_saveTab", "GM_getTabs",
+  "GM_getTab", "GM_saveTab", "GM_getTabs", "GM_download", "GM_cookie",
 ];
 
 /** GM functions that use the mod's stored values. */
@@ -365,6 +365,92 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
     entry.resolveDone(true);
   };
 
+  // ---- downloads (the optional "downloads" permission, allowed in Settings) ----
+  // GM_download(details) or (url, name). Returns { abort() }.
+  const download = (details, name) => {
+    const d = typeof details === "string" ? { url: details, name } : { ...(details ?? {}) };
+    let done = false;
+    let port;
+    const fire = (k, v) => {
+      try {
+        d[k]?.(v);
+      } catch (e) {
+        logError(e);
+      }
+    };
+    const finish = (k, v) => {
+      if (done) return;
+      done = true;
+      fire(k, v);
+      try {
+        port?.disconnect();
+      } catch {}
+    };
+    if (!isolated) {
+      setTimeout(() => finish("onerror", { error: "not_supported", details: "GM_download isn't available to scripts that run in the page (@inject-into page)" }));
+      return { abort() {} };
+    }
+    const url = d.url instanceof Blob ? URL.createObjectURL(d.url) : new URL(String(d.url), location.href).href;
+    // blob: and data: URLs are read here; the extension can't open the page's.
+    const body = /^(blob|data):/i.test(url)
+      ? fetch(url).then(async (r) => ({ type: r.headers.get("content-type") || "application/octet-stream", base64: toBase64(new Uint8Array(await r.arrayBuffer())) }))
+      : Promise.resolve(null);
+    port = chrome.runtime.connect({ name: "gm-download" });
+    port.onMessage.addListener((m) => {
+      if (m.type === "load") finish("onload", { url, name: d.name });
+      else if (m.type === "timeout") finish("ontimeout", {});
+      else if (m.type === "error") {
+        console.warn(tag, `GM_download ${url}: ${m.error}`);
+        finish("onerror", { error: m.code ?? "unknown", details: m.error });
+      } else if (m.type === "progress") fire("onprogress", { loaded: m.loaded, total: m.total, lengthComputable: m.total > 0 });
+    });
+    port.onDisconnect.addListener(() => finish("onerror", { error: "disconnected", details: "disconnected" }));
+    body.then(
+      (b) =>
+        !done &&
+        port.postMessage({
+          mod: cfg.id,
+          token: cfg.token,
+          request: { url: b ? null : url, body: b, name: d.name, headers: d.headers ?? {}, saveAs: Boolean(d.saveAs), conflictAction: d.conflictAction, timeout: d.timeout || 0 },
+        }),
+      (e) => finish("onerror", { error: "read_failed", details: String(e) }),
+    );
+    return {
+      abort() {
+        if (done) return;
+        try {
+          port.postMessage({ abort: true });
+        } catch {}
+        finish("onerror", { error: "aborted", details: "aborted" });
+      },
+    };
+  };
+  const downloadPromise = (details, name) => {
+    const d = typeof details === "string" ? { url: details, name } : { ...(details ?? {}) };
+    let handle;
+    const p = new Promise((resolve, reject) => {
+      handle = download({
+        ...d,
+        onload: (r) => (d.onload?.(r), resolve(r)),
+        onerror: (r) => (d.onerror?.(r), reject(r)),
+        ontimeout: (r) => (d.ontimeout?.(r), reject(r)),
+      });
+    });
+    p.abort = () => handle.abort();
+    return p;
+  };
+
+  // ---- cookies (the optional "cookies" permission, allowed in Settings) ----
+  // GM_cookie.list/set/delete(details, cb), cb(result, error); GM.cookie.* return promises.
+  const cookieCall = (op, details) => call("cookie", op, { ...(details ?? {}), pageUrl: location.href });
+  const cookieFn = (op) => (details, cb) => {
+    const p = cookieCall(op, details);
+    if (typeof cb === "function") p.then((r) => cb(r, undefined), (e) => cb(undefined, String(e?.message ?? e)));
+    else p.catch(logError);
+  };
+  const cookie = { list: cookieFn("list"), set: cookieFn("set"), delete: cookieFn("delete") };
+  const cookiePromises = { list: (d) => cookieCall("list", d), set: (d) => cookieCall("set", d), delete: (d) => cookieCall("delete", d) };
+
   // ---- per-tab objects ----
   const getTab = (cb) => {
     const p = call("getTab");
@@ -519,7 +605,7 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
     addStyle, addElement, getResourceText, getResourceURL,
     xmlhttpRequest, openInTab, notification, setClipboard,
     registerMenuCommand, unregisterMenuCommand,
-    getTab, saveTab, getTabs,
+    getTab, saveTab, getTabs, download, cookie,
     log: (...a) => console.log(...a),
   };
   const asyncNames = { xmlhttpRequest: "xmlHttpRequest", getResourceURL: "getResourceUrl" };
@@ -539,6 +625,8 @@ export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
     GM[asyncNames[name] ?? name] =
       name === "xmlhttpRequest" ? xmlHttpRequestPromise
         : name === "notification" ? (...a) => fn(...a).done
+        : name === "download" ? downloadPromise
+        : name === "cookie" ? cookiePromises
           : async (...a) => fn(...a);
   }
   // Granted functions Eyepatch doesn't have throw a clear error instead of being undefined.

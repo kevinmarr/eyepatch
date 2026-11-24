@@ -281,7 +281,9 @@ GM_addStyle(\`.Layout-sidebar { display: none !important; }\`);
   list each host it reaches with \`@connect example.com\`), \`GM_registerMenuCommand\`
   (shows in the side panel's menu under the mod), \`GM_openInTab\`,
   \`GM_notification\` (with \`onclick\`/\`ondone\`), \`GM_getTab\`/\`GM_saveTab\`/\`GM_getTabs\`
-  (an object per tab, kept until it closes), \`GM_setClipboard\`, \`GM_getResourceText\`/\`GM_getResourceURL\`,
+  (an object per tab, kept until it closes), \`GM_download\` and \`GM_cookie\` (the
+  user allows these in Settings the first time; cookies and download URLs follow
+  the same \`@connect\` rule as requests), \`GM_setClipboard\`, \`GM_getResourceText\`/\`GM_getResourceURL\`,
   \`GM_info\`, \`GM_log\`, and the \`GM.*\` promise versions of each.
 - \`@require <url>\` and \`@resource <name> <url>\` are downloaded once and cached.
 - Changes reload the tab whose agent made them.

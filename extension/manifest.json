@@ -22,6 +22,10 @@
     "nativeMessaging",
     "declarativeNetRequestWithHostAccess"
   ],
+  "optional_permissions": [
+    "downloads",
+    "cookies"
+  ],
   "host_permissions": [
     "<all_urls>"
   ],

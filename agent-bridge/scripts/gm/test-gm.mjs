@@ -30,8 +30,23 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE_DIR = path.resolve(HERE, "../..");
 const refIdx = process.argv.indexOf("--reference");
 const referenceExt = refIdx > 0 ? path.resolve(process.argv[refIdx + 1]) : null;
-const EXT = referenceExt ?? process.env.EYEPATCH_TEST_EXTENSION ?? path.resolve(BRIDGE_DIR, "../extension");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "eyepatch-gm-"));
+/**
+ * Eyepatch, as a copy whose optional permissions (downloads, cookies) are
+ * granted from the start: Chrome only grants them through a prompt that
+ * headless Chromium can't answer.
+ */
+function eyepatchWithOptionalPermissions() {
+  const src = path.resolve(BRIDGE_DIR, "../extension");
+  const dest = path.join(TMP, "extension");
+  fs.cpSync(src, dest, { recursive: true });
+  const manifest = JSON.parse(fs.readFileSync(path.join(dest, "manifest.json"), "utf8"));
+  manifest.permissions = [...manifest.permissions, ...(manifest.optional_permissions ?? [])];
+  delete manifest.optional_permissions;
+  fs.writeFileSync(path.join(dest, "manifest.json"), JSON.stringify(manifest, null, 2));
+  return dest;
+}
+const EXT = referenceExt ?? process.env.EYEPATCH_TEST_EXTENSION ?? eyepatchWithOptionalPermissions();
 const file = (name) => fs.readFileSync(path.join(HERE, name), "utf8");
 
 // ---- test server: 127.0.0.1, other.test and blocked.test all land here ----

@@ -1,14 +1,37 @@
 {
   "xhr: host not in @connect": {
     "why": "Eyepatch enforces @connect, as Tampermonkey does; Violentmonkey ignores it",
-    "eyepatch": { "kind": "error", "status": 0 }
+    "eyepatch": {
+      "kind": "error",
+      "status": 0
+    }
   },
   "xhr: redirect to a host not in @connect": {
     "why": "the final host must be in @connect too",
-    "eyepatch": { "kind": "error", "status": 0 }
+    "eyepatch": {
+      "kind": "error",
+      "status": 0
+    }
   },
   "document-start: values are ready": {
     "why": "Eyepatch runs document-start scripts while the page is still loading",
-    "eyepatch": { "ran": true, "readyState": "loading", "sawStoredValue": true }
+    "eyepatch": {
+      "ran": true,
+      "readyState": "loading",
+      "sawStoredValue": true
+    }
+  },
+  "cookie: set, list, delete": {
+    "why": "Violentmonkey has no GM_cookie; Tampermonkey does",
+    "eyepatch": [
+      [
+        "v1"
+      ],
+      []
+    ]
+  },
+  "cookie: other sites need @connect": {
+    "why": "Violentmonkey has no GM_cookie; Eyepatch limits it to the page's site and @connect hosts",
+    "eyepatch": "blocked"
   }
 }

@@ -523,6 +523,25 @@ const siteList = (sites, n = 2) => sites.slice(0, n).join(", ") + (sites.length 
 
 let modsKey = "";
 
+// GM_download and GM_cookie need permissions Eyepatch asks for only when a
+// mod uses them: the mod's row offers them (Chrome wants a click to ask).
+const OPTIONAL = [
+  { grant: "download", permission: "downloads", label: "Allow downloads" },
+  { grant: "cookie", permission: "cookies", label: "Allow cookies" },
+];
+let permitted = new Set(DEMO ? [] : (chrome.runtime.getManifest().permissions ?? []));
+async function readPermissions() {
+  if (DEMO) return;
+  permitted = new Set((await chrome.permissions.getAll()).permissions ?? []);
+  if (state) rerender();
+}
+readPermissions();
+if (!DEMO) {
+  chrome.permissions.onAdded.addListener(readPermissions);
+  chrome.permissions.onRemoved.addListener(readPermissions);
+}
+const missingPermissions = (mod) => (mod.error ? [] : OPTIONAL.filter((o) => mod.grants?.includes(o.grant) && !permitted.has(o.permission)));
+
 function renderMods(s) {
   const mods = s.mods ?? [];
   $("mods-section").hidden = !s.connected && !mods.length;
@@ -532,7 +551,7 @@ function renderMods(s) {
     modFromLink = null;
     clearTimeout(modLinkTimer);
   }
-  const key = JSON.stringify([mods, confirming, currentMod]);
+  const key = JSON.stringify([mods, confirming, currentMod, [...permitted]]);
   if (key === modsKey) return arrived && showCurrentMod();
   modsKey = key;
   const bySite = new Map();
@@ -558,6 +577,7 @@ function renderMods(s) {
             : `<div class="row" data-mod="${esc(m.id)}"${m.id === currentMod ? ` aria-current="true" tabindex="-1"` : ""}><div class="main"><span class="name">${esc(m.name)}${site === OTHER_MODS ? sitesIcon(sitesOf(m)) : ""}</span>` +
               `<span class="sub${m.error ? " danger" : ""}" title="${esc([m.error ?? m.description, ...(m.warnings ?? []), m.id].filter(Boolean).join("\n"))}">${esc(m.error ?? m.description ?? m.id)}</span>` +
               `</div>` +
+              missingPermissions(m).map((o) => `<button type="button" class="btn" data-do="permit" data-permission="${o.permission}">${o.label}</button>`).join("") +
               (m.error ? "" : `<button type="button" class="switch lg" role="switch" aria-checked="${m.enabled}" aria-label="${esc(m.name)}" data-do="toggle"></button>`) +
               `<button type="button" class="icon-btn lg" data-do="reveal" aria-label="Show ${esc(m.name)} in its folder" title="Show in folder">${icon("folder-open")}</button>` +
               `<button type="button" class="icon-btn lg" data-do="ask-delete" aria-label="Delete ${esc(m.name)}" title="Delete">${icon("trash-2")}</button></div>`,
@@ -601,6 +621,12 @@ $("mods").addEventListener("click", (e) => {
     return post({ type: "mod_set_enabled", id, enabled });
   }
   if (what === "reveal") return post({ type: "mod_reveal", id });
+  if (what === "permit") {
+    const permission = e.target.closest("[data-permission]").dataset.permission;
+    if (DEMO) return console.log("request", permission);
+    // Must be called right in the click.
+    return chrome.permissions.request({ permissions: [permission] }).then(readPermissions, (err) => showModsStatus([err.message]));
+  }
   if (what === "ask-delete") confirming = `mod:${id}`;
   else if (what === "confirm-cancel") confirming = null;
   else if (what === "delete") {

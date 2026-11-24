@@ -285,6 +285,7 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
     getTab: ["getTab", "saveTab", "getTabs"],
     saveTab: ["saveTab"],
     getTabs: ["getTabs"],
+    cookie: ["cookie"],
     menuRegister: ["registerMenuCommand"],
     menuUnregister: ["registerMenuCommand", "unregisterMenuCommand"],
   };
@@ -352,6 +353,10 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
         if (notifications.get(id)?.modId === modId) await chrome.notifications.clear(id).catch(() => {});
         return null;
       }
+      case "cookie": {
+        const [op, details = {}] = args;
+        return cookie(mod, op, details, sender.url ?? details.pageUrl);
+      }
       case "getTab": {
         if (tabId == null) return {};
         return (await readTabs(modId))[tabId] ?? {};
@@ -387,6 +392,135 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
       (e) => sendResponse({ error: String(e?.message ?? e) }),
     );
     return true;
+  }
+
+  // ---------- optional permissions ----------
+  // GM_download and GM_cookie need permissions Eyepatch doesn't ask for at
+  // install; Settings asks when a mod that uses them is there.
+
+  async function needPermission(permission, what) {
+    if (await chrome.permissions.contains({ permissions: [permission] }).catch(() => false)) return;
+    const err = new Error(`${what} needs permission: allow it next to the mod in Eyepatch's Settings`);
+    err.code = "not_permitted";
+    throw err;
+  }
+
+  // ---------- GM_cookie ----------
+
+  const COOKIE_FIELDS = ["domain", "expirationDate", "hostOnly", "httpOnly", "name", "path", "sameSite", "secure", "session", "storeId", "value"];
+
+  /** list, set or delete cookies of the page's site or an @connect host. */
+  async function cookie(mod, op, details, pageUrl) {
+    await needPermission("cookies", "GM_cookie");
+    const url = details.url ? new URL(details.url, pageUrl) : new URL(pageUrl);
+    if (!/^https?:$/.test(url.protocol)) throw new Error(`only http and https cookies, not ${url.protocol}`);
+    if (!connectAllowed(mod, url, pageUrl)) throw new Error(`blocked: add "// @connect ${url.hostname}" to the script's header`);
+    if (details.domain) {
+      const d = String(details.domain).replace(/^\./, "").toLowerCase();
+      if (!connectAllowed(mod, new URL(`${url.protocol}//${d}/`), pageUrl)) throw new Error(`blocked: add "// @connect ${d}" to the script's header`);
+    }
+    const pick = (c) => Object.fromEntries(COOKIE_FIELDS.filter((k) => k in c).map((k) => [k, c[k]]));
+    switch (op) {
+      case "list": {
+        const query = details.domain ? { domain: details.domain } : { url: url.href };
+        if (details.name != null) query.name = String(details.name);
+        if (details.path != null) query.path = String(details.path);
+        return (await chrome.cookies.getAll(query)).map(pick);
+      }
+      case "set": {
+        const c = { url: url.href, name: String(details.name ?? ""), value: String(details.value ?? "") };
+        for (const k of ["domain", "path", "secure", "httpOnly", "expirationDate", "sameSite"]) if (details[k] != null) c[k] = details[k];
+        const set = await chrome.cookies.set(c);
+        if (!set) throw new Error("the cookie wasn't set");
+        return null;
+      }
+      case "delete":
+        await chrome.cookies.remove({ url: url.href, name: String(details.name ?? "") });
+        return null;
+    }
+    throw new Error(`unknown GM_cookie method ${op}`);
+  }
+
+  // ---------- GM_download ----------
+
+  /** A file name Chrome will take: relative, no "..", no characters file systems refuse. */
+  function downloadName(name, url) {
+    let n = String(name || "").replace(/\\/g, "/");
+    if (!n && url) n = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    n = n
+      .split("/")
+      .map((part) => part.replace(/[<>:"|?*\x00-\x1f]/g, "_").replace(/^\.+$/, "_").trim())
+      .filter(Boolean)
+      .join("/");
+    return n || undefined;
+  }
+
+  /** chrome.runtime.onUserScriptConnect, for "gm-download" ports: one download each. */
+  function onDownloadConnect(port) {
+    let downloadId = null;
+    let listener = null;
+    let timer = null;
+    const post = (m) => {
+      try {
+        port.postMessage(m);
+      } catch {}
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (listener) chrome.downloads?.onChanged.removeListener(listener);
+      listener = null;
+    };
+    port.onDisconnect.addListener(cleanup);
+    port.onMessage.addListener(async (msg) => {
+      if (msg.abort) {
+        cleanup();
+        if (downloadId != null) chrome.downloads.cancel(downloadId).catch(() => {});
+        return;
+      }
+      try {
+        await modsLoaded;
+        const mod = getMod(msg.mod);
+        if (!mod || mod.token !== msg.token) throw new Error(`mod ${msg.mod} isn't running`);
+        if (!mod.grants?.includes("download")) throw new Error("needs @grant GM_download");
+        await needPermission("downloads", "GM_download");
+        const req = msg.request;
+        let url;
+        if (req.body) url = `data:${req.body.type};base64,${req.body.base64}`;
+        else {
+          const u = new URL(req.url);
+          if (!/^https?:$/.test(u.protocol)) throw new Error(`only http and https URLs, not ${u.protocol}`);
+          if (!connectAllowed(mod, u, port.sender?.url)) throw new Error(`blocked: add "// @connect ${u.hostname}" to the script's header`);
+          url = u.href;
+        }
+        const headers = Object.entries(req.headers ?? {}).map(([name, value]) => ({ name, value: String(value) }));
+        const options = { url, saveAs: req.saveAs, filename: downloadName(req.name, req.url) };
+        if (headers.length && !req.body) options.headers = headers;
+        if (["uniquify", "overwrite", "prompt"].includes(req.conflictAction)) options.conflictAction = req.conflictAction;
+        listener = (delta) => {
+          if (delta.id !== downloadId) return;
+          if (delta.state?.current === "complete") {
+            cleanup();
+            post({ type: "load" });
+          } else if (delta.state?.current === "interrupted" || delta.error) {
+            cleanup();
+            const code = delta.error?.current ?? "interrupted";
+            post({ type: "error", error: code, code: code === "USER_CANCELED" ? "aborted" : "download_failed" });
+          }
+        };
+        chrome.downloads.onChanged.addListener(listener);
+        downloadId = await chrome.downloads.download(options);
+        if (req.timeout > 0) {
+          timer = setTimeout(() => {
+            cleanup();
+            chrome.downloads.cancel(downloadId).catch(() => {});
+            post({ type: "timeout" });
+          }, req.timeout);
+        }
+      } catch (e) {
+        cleanup();
+        post({ type: "error", error: String(e?.message ?? e), code: e?.code });
+      }
+    });
   }
 
   // ---------- GM_xmlhttpRequest ----------
@@ -433,6 +567,7 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
 
   /** chrome.runtime.onUserScriptConnect, for "gm-xhr" ports: one request each. */
   function onConnect(port) {
+    if (port.name === "gm-download") return onDownloadConnect(port);
     if (port.name !== "gm-xhr") return;
     const controller = new AbortController();
     let timedOut = false;

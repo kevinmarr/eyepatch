@@ -219,7 +219,7 @@ const GM_FUNCTIONS: Record<string, string> = Object.fromEntries(
     "addStyle", "addElement", "getResourceText", "getResourceURL",
     "xmlhttpRequest", "openInTab", "notification", "setClipboard",
     "registerMenuCommand", "unregisterMenuCommand", "log", "info",
-    "getTab", "saveTab", "getTabs",
+    "getTab", "saveTab", "getTabs", "download", "cookie",
   ].map((n) => [n.toLowerCase(), n]),
 );
 /** Ones that work without the extension, so also in the page's world. */
@@ -244,7 +244,8 @@ export function parseUserScript(id: string, src: string): Omit<Mod, "enabled"> {
   const granted = all(meta, "grant").flatMap((v) => v.split(/\s+/)).filter(Boolean);
   for (const g of granted) {
     if (PLAIN_GRANTS.has(g.toLowerCase())) continue;
-    const fn = GM_FUNCTIONS[g.replace(/^GM[._]/, "").toLowerCase()];
+    // Tampermonkey also takes GM_cookie.list and the like.
+    const fn = GM_FUNCTIONS[g.replace(/^GM[._]/, "").replace(/^cookie\.\w+$/i, "cookie").toLowerCase()];
     if (fn && /^GM[._]/.test(g)) grants.add(fn);
     else unsupported.push(g);
   }
