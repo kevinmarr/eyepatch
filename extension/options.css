@@ -84,3 +84,8 @@
 .add-list .tile { width: 32px; height: 32px; border-radius: 9px; font-size: 13px; }
 .add-list .tile img { width: 18px; height: 18px; }
 .add-list .installed { display: flex; align-items: center; gap: 5px; font-size: var(--fs-meta); color: var(--text-faint); }
+.row .sub.mono, .option .sub.mono { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.add-list .menu-label { padding: 8px 14px 2px; }
+.local-form { display: flex; gap: 8px; padding: 8px 2px 0 14px; }
+.local-form .field { flex: 1; min-width: 0; }
+.field.mono { font-family: var(--mono); font-size: 13px; }

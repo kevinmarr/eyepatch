@@ -17,6 +17,8 @@ export type FromExtension =
   | { type: "agent_select"; tabId: number; id: string }
   | { type: "agent_install"; id: string }
   | { type: "agent_remove"; id: string }
+  | { type: "agent_add_local"; command: string; registryId?: string }
+  | { type: "agent_add_local_clear" }
   | { type: "options_open" }
   | { type: "options_close" }
   | { type: "agents_refresh" }

@@ -38,14 +38,11 @@ the side panel, or not at all:
 
 ## 3. Agents
 
-- **Use an agent you already installed** instead of a managed copy: Settings
-  could find ACP agents on your PATH (or take a command), for people who want
-  to control the version or not spend the disk space. Today only the
-  `EYEPATCH_AGENT` env var does this, for one agent and outside the UI. This
-  would also unlock the registry agents we hide (`NOT_OFFERED` in
-  `agent-bridge/src/agents.ts`): pi ACP, which expects `pi` on your PATH, and
-  Nova, Qoder and MiniMax Code, which don't run on Bun but would run on your
-  own Node.
+- **Agents you installed yourself** (Settings → Add an agent: "On this
+  computer", or "Use a command"): untested with real agents. Check that the
+  login-shell PATH lookup finds Homebrew/npm installs when Chrome starts Agent
+  Bridge on macOS, that the hidden registry agents (pi ACP, Nova, Qoder,
+  MiniMax Code) work this way on your own Node, and Windows (`.cmd` shims).
 
 ## 4. Mods
 

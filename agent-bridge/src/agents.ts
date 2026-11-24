@@ -20,6 +20,10 @@ import { HOME, MODS_DIR } from "./config.ts";
  * installs take a lock, and each process marks the copies it's running so
  * another one's update doesn't delete them.
  *
+ * People can also use an agent they installed themselves ("local" agents):
+ * Settings offers the registry agents it finds on the PATH, or takes any
+ * command. Those are run as they are, never updated or deleted by us.
+ *
  * EYEPATCH_AGENT="cmd args..." overrides all of this with a custom command.
  */
 
@@ -53,6 +57,24 @@ const FEATURED = ["claude-acp", "codex-acp", "gemini", "github-copilot-cli", "cu
 /** Id used for the agent given by EYEPATCH_AGENT. */
 export const CUSTOM = "custom";
 
+/** Ids of agents the user installed themselves start with this. */
+const LOCAL = "local:";
+
+/**
+ * Commands a registry agent goes by when installed by hand, when it isn't
+ * its npm package's name or its archive's command (see localCommandNames).
+ */
+const KNOWN_COMMANDS: Record<string, string[]> = {
+  "claude-acp": ["claude-agent-acp", "claude-code-acp"],
+  gemini: ["gemini"],
+  "github-copilot-cli": ["copilot"],
+  opencode: ["opencode"],
+  "pi-acp": ["pi-acp"],
+};
+
+/** An agent the user installed themselves, run with their own command. */
+type LocalAgent = { id: string; name: string; cmd: string; args: string[]; registryId?: string };
+
 export type LaunchSpec = { cmd: string; args: string[]; env: Record<string, string> };
 
 type BinaryTarget = { archive: string; cmd: string; args?: string[]; env?: Record<string, string>; sha256?: string };
@@ -69,6 +91,59 @@ type RegistryAgent = {
 };
 
 type InstallInfo = { id: string; version: string; launch: LaunchSpec };
+
+/** Split a command line into words, with "double" and 'single' quotes and backslash escapes. */
+export function splitCommand(line: string): string[] {
+  const words: string[] = [];
+  let word: string | null = null;
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === '"' && i + 1 < line.length) word += line[++i];
+      else word += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      word ??= "";
+    } else if (c === "\\" && process.platform !== "win32" && i + 1 < line.length) {
+      word = (word ?? "") + line[++i];
+    } else if (/\s/.test(c)) {
+      if (word !== null) words.push(word);
+      word = null;
+    } else word = (word ?? "") + c;
+  }
+  if (quote) throw new Error("The command has an unclosed quote");
+  if (word !== null) words.push(word);
+  return words;
+}
+
+/**
+ * The PATH of the user's login shell. Chrome starts Agent Bridge with a bare
+ * one on macOS (no Homebrew, npm or ~/.local/bin), where hand-installed agents
+ * usually are, and where their `#!/usr/bin/env node` needs to find Node.
+ */
+async function loginShellPath(): Promise<string> {
+  const own = process.env.PATH ?? "";
+  if (process.platform === "win32") return own;
+  const home = os.homedir();
+  const usual = ["/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`, `${home}/.bun/bin`, `${home}/.npm-global/bin`, `${home}/.volta/bin`];
+  let fromShell = "";
+  try {
+    const marker = "__EYEPATCH_PATH__=";
+    const child = Bun.spawn([process.env.SHELL || "/bin/sh", "-l", "-i", "-c", `printf '\\n${marker}%s\\n' "$PATH"`], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const timer = setTimeout(() => child.kill(), 5000);
+    const out = await new Response(child.stdout).text();
+    clearTimeout(timer);
+    fromShell = out.split("\n").find((l) => l.startsWith(marker))?.slice(marker.length) ?? "";
+  } catch {}
+  const dirs = [...fromShell.split(path.delimiter), ...own.split(path.delimiter), ...usual].filter(Boolean);
+  return [...new Set(dirs)].join(path.delimiter);
+}
 
 type InstallProgress = {
   id: string;
@@ -219,6 +294,11 @@ async function checkCanChat(spec: LaunchSpec): Promise<string | null> {
   return result;
 }
 
+/** A word of a command line, quoted if it needs to be. */
+const quoteArg = (s: string) => (/^[\w@%+=:,./~-]+$/.test(s) ? s : `"${s.replace(/(["\\$`])/g, "\\$1")}"`);
+
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+
 const pidAlive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -277,7 +357,18 @@ export type SelectKind = "model" | "effort" | "mode";
 export class AgentManager {
   private registry: RegistryAgent[] = [];
   private registryError: string | null = null;
-  private settings: { agent?: string; models?: Record<string, string>; efforts?: Record<string, string>; modes?: Record<string, string> } = {};
+  private settings: {
+    agent?: string;
+    models?: Record<string, string>;
+    efforts?: Record<string, string>;
+    modes?: Record<string, string>;
+    local?: LocalAgent[];
+  } = {};
+  private local = new Map<string, LocalAgent>(); // id -> an agent the user installed themselves
+  private found: { registryId: string; name: string; command: string }[] = []; // registry agents on the PATH, not yet added
+  private adding: { command: string; error: string | null; busy: boolean } | null = null;
+  private searchPath = process.env.PATH ?? "";
+  private searchPathReady: Promise<void> = Promise.resolve();
   private installed = new Map<string, InstallInfo>(); // id -> newest installed copy
   private installing: InstallProgress | null = null;
   private installError: { id: string; message: string } | null = null;
@@ -292,6 +383,10 @@ export class AgentManager {
     this.settings = await Bun.file(SETTINGS_FILE)
       .json()
       .catch(() => ({}));
+    this.local = new Map((this.settings.local ?? []).filter((a) => a?.id?.startsWith(LOCAL) && a.cmd).map((a) => [a.id, a]));
+    // Needed before a local agent starts; otherwise it can come in the background.
+    this.searchPathReady = loginShellPath().then((p) => void (this.searchPath = p));
+    if (this.local.size) await this.searchPathReady;
     this.registry = await Bun.file(REGISTRY_CACHE)
       .json()
       .then((r) => r.agents ?? [])
@@ -314,20 +409,28 @@ export class AgentManager {
     if (this.custom) return CUSTOM;
     // A chosen agent whose copy is gone (e.g. its folder was deleted) has to be picked again.
     const id = this.settings.agent;
-    return id && this.installed.has(id) ? id : null;
+    return id && (this.installed.has(id) || this.local.has(id)) ? id : null;
   }
 
   installedIds(): string[] {
-    return this.custom ? [CUSTOM] : [...this.installed.keys()];
+    return this.custom ? [CUSTOM] : [...this.installed.keys(), ...this.local.keys()];
   }
 
-  /** Delete an agent's copy. New tabs fall back to another installed agent. */
+  /** Delete an agent's copy (or stop using one the user installed). New tabs fall back to another installed agent. */
   async remove(id: string) {
-    if (this.custom || this.installing?.id === id || !this.installed.has(id)) return;
+    if (this.custom) return;
+    if (this.local.has(id)) {
+      this.local.delete(id);
+      if (this.settings.agent === id) this.settings.agent = this.installedIds()[0];
+      await this.saveSettings();
+      void this.detect();
+      return;
+    }
+    if (this.installing?.id === id || !this.installed.has(id)) return;
     this.installed.delete(id);
     if (this.installError?.id === id) this.installError = null;
     if (this.settings.agent === id) {
-      this.settings.agent = [...this.installed.keys()][0];
+      this.settings.agent = this.installedIds().find((x) => x !== id);
       await this.saveSettings();
     }
     this.sendView();
@@ -335,7 +438,7 @@ export class AgentManager {
   }
 
   isInstalled(id: string) {
-    return id === CUSTOM ? Boolean(this.custom) : this.installed.has(id);
+    return id === CUSTOM ? Boolean(this.custom) : this.installed.has(id) || this.local.has(id);
   }
 
   /** How to start an agent, or undefined if it isn't installed. */
@@ -344,6 +447,8 @@ export class AgentManager {
       const [cmd, ...args] = this.custom.split(/\s+/);
       return { cmd, args, env: {} };
     }
+    const local = this.local.get(id);
+    if (local) return { cmd: local.cmd, args: local.args, env: this.localEnv() };
     const info = this.installed.get(id);
     return info && resolveLaunch(info.launch, versionDir(id, info.version));
   }
@@ -369,7 +474,7 @@ export class AgentManager {
 
   /** Display name from the registry. */
   nameOf(id: string) {
-    return this.registry.find((a) => a.id === id)?.name ?? id;
+    return this.local.get(id)?.name ?? this.registry.find((a) => a.id === id)?.name ?? id;
   }
 
   /** The model, effort level or mode last picked for an agent. */
@@ -384,6 +489,7 @@ export class AgentManager {
   }
 
   private async saveSettings() {
+    this.settings.local = [...this.local.values()];
     await Bun.write(SETTINGS_FILE, JSON.stringify(this.settings, null, 2));
   }
 
@@ -415,6 +521,7 @@ export class AgentManager {
     }
     // Another Agent Bridge may have installed or updated agents meanwhile.
     await this.scanInstalled();
+    await this.detect();
     this.sendView();
     void this.updateInstalled();
   }
@@ -474,6 +581,94 @@ export class AgentManager {
     await this.saveSettings();
     this.sendView();
     return true;
+  }
+
+  /** Local agents get the login shell's PATH (for `#!/usr/bin/env node` and the like). */
+  private localEnv(): Record<string, string> {
+    return process.platform === "win32" ? {} : { PATH: this.searchPath };
+  }
+
+  /** Where a command is, on the user's PATH or as a path. */
+  private which(cmd: string): string | null {
+    if (cmd.includes("/") || (process.platform === "win32" && cmd.includes("\\"))) {
+      const full = path.resolve(cmd.replace(/^~(?=[\\/])/, os.homedir()));
+      return existsSync(full) ? full : null;
+    }
+    return Bun.which(cmd, { PATH: this.searchPath });
+  }
+
+  /** The commands a hand-installed copy of a registry agent may go by, most likely first. */
+  private static localCommandNames(agent: RegistryAgent): string[] {
+    const names = [...(KNOWN_COMMANDS[agent.id] ?? [])];
+    const npx = agent.distribution.npx;
+    if (npx) names.push(npx.package.replace(/(.)@[^@/]*$/, "$1").split("/").pop()!);
+    for (const t of Object.values(agent.distribution.binary ?? {})) names.push(path.basename(t.cmd.replace(/\\/g, "/")).replace(/\.exe$/i, ""));
+    return [...new Set(names.filter(Boolean))];
+  }
+
+  /** Look for registry agents installed by hand, to offer in Settings. */
+  private async detect() {
+    if (this.custom) return;
+    await this.searchPathReady;
+    const used = new Set([...this.local.values()].map((a) => a.registryId ?? a.cmd));
+    const found: typeof this.found = [];
+    for (const agent of this.registry) {
+      if (used.has(agent.id)) continue;
+      const npx = agent.distribution.npx;
+      const binary = PLATFORM ? agent.distribution.binary?.[PLATFORM] : undefined;
+      const args = npx?.args ?? binary?.args ?? Object.values(agent.distribution.binary ?? {})[0]?.args ?? [];
+      for (const name of AgentManager.localCommandNames(agent)) {
+        const cmd = this.which(name);
+        if (!cmd) continue;
+        // A managed copy's own folder isn't "installed by hand".
+        if (cmd.startsWith(AGENTS_DIR + path.sep)) continue;
+        found.push({ registryId: agent.id, name: agent.name, command: [name, ...args].map(quoteArg).join(" ") });
+        break;
+      }
+    }
+    this.found = found;
+  }
+
+  /**
+   * Use an agent the user installed themselves: `command` is how to start it
+   * in ACP mode. Checks that it speaks ACP first, and makes it the default.
+   */
+  async addLocal(command: string, registryId?: string): Promise<string | null> {
+    if (this.custom || this.adding?.busy) return null;
+    this.adding = { command, error: null, busy: true };
+    this.sendView();
+    try {
+      await this.searchPathReady;
+      const [name, ...args] = splitCommand(command.trim());
+      if (!name) throw new Error("Enter the command that starts the agent");
+      const cmd = this.which(name);
+      if (!cmd) throw new Error(`Couldn’t find ${name}`);
+      const spec: LaunchSpec = { cmd, args, env: this.localEnv() };
+      const problem = await checkCanChat(spec);
+      if (problem) throw new Error(`${name} ${problem}`);
+      const agent = registryId ? this.registry.find((a) => a.id === registryId) : undefined;
+      const base = slugify(agent?.id ?? path.basename(name).replace(/\.(exe|cmd|bat)$/i, "")) || "agent";
+      let id = LOCAL + base;
+      for (let n = 2; this.local.has(id); n++) id = `${LOCAL}${base}-${n}`;
+      this.local.set(id, { id, name: agent?.name ?? path.basename(name), cmd, args, ...(agent ? { registryId: agent.id } : {}) });
+      this.settings.agent = id;
+      await this.saveSettings();
+      this.adding = null;
+      await this.detect();
+      return id;
+    } catch (e) {
+      this.adding = { command, error: (e as Error).message, busy: false };
+      return null;
+    } finally {
+      this.sendView();
+    }
+  }
+
+  /** Forget a failed attempt to add a local agent. */
+  clearAdding() {
+    if (this.adding?.busy) return;
+    this.adding = null;
+    this.sendView();
   }
 
   private failInstall(id: string, message: string) {
@@ -631,11 +826,31 @@ export class AgentManager {
         list.push({ id, name: id, description: null, icon: null, website: null, version: info.version, installedVersion: info.version, kind: null, unavailable: null, featured: false });
       }
     }
+    // Agents the user installed: run as they are, with no version of ours.
+    for (const a of this.local.values()) {
+      const reg = a.registryId ? this.registry.find((r) => r.id === a.registryId) : undefined;
+      list.push({
+        id: a.id,
+        name: a.name,
+        description: reg?.description ?? null,
+        icon: reg?.icon ?? null,
+        website: reg?.website ?? reg?.repository ?? null,
+        version: "local",
+        installedVersion: "local",
+        kind: "local",
+        unavailable: null,
+        featured: false,
+        command: [a.cmd, ...a.args].map(quoteArg).join(" "),
+      } as (typeof list)[number]);
+    }
+    const icons = new Map(this.registry.map((r) => [r.id, r.icon ?? null]));
     return {
       defaultAgent: this.defaultId,
       custom: this.custom,
       agentsDir: AGENTS_DIR.startsWith(os.homedir() + path.sep) ? "~" + AGENTS_DIR.slice(os.homedir().length) : AGENTS_DIR,
       list,
+      found: this.found.map((f) => ({ ...f, icon: icons.get(f.registryId) ?? null })),
+      adding: this.adding,
       installing: this.installing,
       installError: this.installError,
       registryError: this.registry.length ? null : this.registryError,

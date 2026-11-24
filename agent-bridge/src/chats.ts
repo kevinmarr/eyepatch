@@ -231,6 +231,12 @@ export class Chats {
       case "agent_remove":
         void this.remove(msg.id);
         break;
+      case "agent_add_local":
+        void this.addLocal(msg.command, msg.registryId);
+        break;
+      case "agent_add_local_clear":
+        this.catalog.clearAdding();
+        break;
       case "options_open":
         this.optionsOpen = true;
         for (const id of this.catalog.installedIds()) this.process(id)?.auth.send();
@@ -263,6 +269,14 @@ export class Chats {
   /** Install an agent from the Options page. It becomes the agent for new tabs. */
   private async install(id: string) {
     if (!(await this.catalog.choose(id))) return;
+    this.adoptDefault();
+    if (this.optionsOpen) this.process(id);
+  }
+
+  /** Start using an agent the user installed themselves. */
+  private async addLocal(command: string, registryId?: string) {
+    const id = await this.catalog.addLocal(command, registryId);
+    if (!id) return;
     this.adoptDefault();
     if (this.optionsOpen) this.process(id);
   }

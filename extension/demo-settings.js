@@ -20,6 +20,8 @@ const list = [
   agent("augment", "Auggie"),
   agent("kimi", "Kimi CLI"),
 ];
+list.push({ id: "local:pi-acp", name: "pi ACP", installedVersion: "local", kind: "local", command: "/opt/homebrew/bin/pi-acp" });
+const found = [{ registryId: "qoder", name: "Qoder CLI", icon: null, command: "qodercli --acp" }];
 const methods = [
   { id: "claude", name: "Claude subscription", description: "Pro, Max, Team or Enterprise" },
   { id: "console", name: "Anthropic Console", description: "API usage billing" },
@@ -28,7 +30,7 @@ const methods = [
 const full = {
   connected: true,
   userScripts: true,
-  agents: { list, installing: { id: "opencode", name: "OpenCode", phase: "downloading", received: 84e6, total: 199e6, update: true }, installError: { id: "goose", message: "the download's checksum didn't match" } },
+  agents: { list, installing: { id: "opencode", name: "OpenCode", phase: "downloading", received: 84e6, total: 199e6, update: true }, installError: { id: "goose", message: "the download's checksum didn't match" }, found, adding: { command: "my-agent --acp", busy: false, error: "my-agent doesn't speak ACP" } },
   auths: {
     "claude-acp": { agent: "Claude Agent", state: "authenticated", accounts: [{ label: "Claude Max", email: "person@example.com" }], methods },
     codex: { agent: "Codex", state: "authenticated", accounts: [], methods: [{ id: "chatgpt", name: "ChatGPT account" }, { id: "apikey", name: "API key" }], signIn: { methodId: "chatgpt", name: "ChatGPT account", output: "" } },

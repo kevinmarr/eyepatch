@@ -216,9 +216,12 @@ function renderAgents(s) {
 function agentRow(a, auth, agents) {
   if (confirming === `agent:${a.id}`) {
     const others = installedAgents(state).filter((x) => x.id !== a.id);
-    const consequence = others.length ? `Tabs using ${esc(a.name)} switch to ${esc(others[0].name)}.` : `Tabs using ${esc(a.name)} can’t chat until you install another agent.`;
-    return `<div class="confirm"><div class="main"><span class="name">Uninstall ${esc(a.name)}?</span><span class="sub">${consequence}</span></div>
-      <div class="actions"><button type="button" class="btn quiet" data-do="confirm-cancel">Cancel</button><button type="button" class="btn danger" data-do="uninstall">Uninstall</button></div></div>`;
+    let consequence = others.length ? `Tabs using ${esc(a.name)} switch to ${esc(others[0].name)}.` : `Tabs using ${esc(a.name)} can’t chat until you install another agent.`;
+    // An agent the user installed stays on their computer; Eyepatch just stops using it.
+    const verb = a.command ? "Remove" : "Uninstall";
+    if (a.command) consequence += " It stays installed on your computer.";
+    return `<div class="confirm"><div class="main"><span class="name">${verb} ${esc(a.name)}?</span><span class="sub">${consequence}</span></div>
+      <div class="actions"><button type="button" class="btn quiet" data-do="confirm-cancel">Cancel</button><button type="button" class="btn danger" data-do="uninstall">${verb}</button></div></div>`;
   }
   // Whatever the agent reports about the account, as it reports it.
   const account = (auth?.accounts ?? [])
@@ -238,6 +241,7 @@ function agentRow(a, auth, agents) {
   else if (unauthenticated) sub = `<span class="sub danger">Not authenticated</span>`;
   else if (updating) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Updating…</span>`;
   else if (account) sub = `<span class="sub">${esc(account)}</span>`;
+  else if (a.command) sub = `<span class="sub mono" title="${esc(a.command)}">${esc(a.command)}</span>`;
 
   let actions = "";
   if (inFlow) {
@@ -249,7 +253,7 @@ function agentRow(a, auth, agents) {
     else if (unauthenticated && auth.methods.length) actions += `<button type="button" class="btn primary" data-do="auth">Authenticate</button>`;
     const items = [];
     if (auth?.methods.length && !unauthenticated) items.push(`<button type="button" class="menu-item" role="menuitem" data-do="auth">Reauthenticate</button>`);
-    if (!a.custom) items.push(`<button type="button" class="menu-item danger" role="menuitem" data-do="ask-uninstall" ${agents.installing?.id === a.id ? "disabled" : ""}>Uninstall</button>`);
+    if (!a.custom) items.push(`<button type="button" class="menu-item danger" role="menuitem" data-do="ask-uninstall" ${agents.installing?.id === a.id ? "disabled" : ""}>${a.command ? "Remove" : "Uninstall"}</button>`);
     if (items.length) {
       actions +=
         `<div class="menu-anchor"><button type="button" class="icon-btn lg" data-do="menu" aria-label="More actions for ${esc(a.name)}" aria-haspopup="menu" aria-expanded="${menuFor === a.id}">${icon("ellipsis-vertical")}</button>` +
@@ -380,6 +384,18 @@ function renderAddStatus(s) {
         `<div class="actions"><button type="button" class="btn primary" data-install="${esc(a.id)}">Try again</button></div></div>`,
     );
   }
+  const adding = agents?.adding;
+  if (s.connected && adding) {
+    const name = adding.command.trim().split(/\s+/)[0]?.split(/[\\/]/).pop() || "agent";
+    parts.push(
+      adding.busy
+        ? `<div class="row agent">${tile({ name })}<div class="main"><span class="name">${esc(name)}</span><span class="sub">Checking ${esc(name)}…</span></div></div>` +
+            `<div class="install-status"><div class="progress"><span style="width: 100%"></span></div></div>`
+        : `<div class="row agent">${tile({ name })}<div class="main"><span class="name">${esc(name)}</span><span class="sub danger">Couldn’t add: ${esc(adding.error)}</span></div>` +
+            `<div class="actions"><button type="button" class="btn primary" data-do="local-retry">Try again</button>` +
+            `<button type="button" class="icon-btn lg" data-do="local-dismiss" aria-label="Dismiss" title="Dismiss">${icon("x")}</button></div></div>`,
+    );
+  }
   if (s.connected && agents?.registryError) {
     parts.push(`<div class="install-status"><span class="error-text">${esc(agents.registryError)}</span><div><button type="button" class="btn" data-do="refresh">Try again</button></div></div>`);
   }
@@ -390,20 +406,32 @@ $("add-status").addEventListener("click", (e) => {
   const id = e.target.closest("[data-install]")?.dataset.install;
   if (id) post({ type: "agent_install", id });
   if (e.target.closest("[data-do=refresh]")) post({ type: "agents_refresh" });
+  if (e.target.closest("[data-do=local-dismiss]")) post({ type: "agent_add_local_clear" });
+  if (e.target.closest("[data-do=local-retry]")) {
+    const command = state.agents.adding?.command ?? "";
+    post({ type: "agent_add_local_clear" });
+    openAddDialog(command);
+  }
 });
 
 // ---------- add an agent ----------
 
-$("add-btn").addEventListener("click", openAddDialog);
+$("add-btn").addEventListener("click", () => openAddDialog());
 $("add-close").addEventListener("click", () => $("add-dialog").close());
 $("add-filter").addEventListener("input", renderAddDialog);
 $("add-dialog").addEventListener("click", (e) => e.target === $("add-dialog") && $("add-dialog").close());
 
-function openAddDialog() {
+let commandOpen = false; // the "Use a command" form is showing
+
+function openAddDialog(command = "") {
   $("add-filter").value = "";
+  commandOpen = Boolean(command);
   $("add-dialog").showModal();
   renderAddDialog();
-  $("add-filter").focus();
+  if (command) {
+    $("local-command").value = command;
+    $("local-command").focus();
+  } else $("add-filter").focus();
 }
 
 function renderAddDialog() {
@@ -413,19 +441,55 @@ function renderAddDialog() {
   const list = state.agents.list
     .filter((a) => !a.unavailable && (!q || a.name.toLowerCase().includes(q)))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
-  $("add-list").innerHTML =
-    list
-      .map((a) =>
-        a.installedVersion
-          ? `<button type="button" class="option" role="listitem" disabled>${tile(a)}<span class="main"><span class="name">${esc(a.name)}</span></span><span class="installed">${icon("check", { size: 14 })}Installed</span></button>`
-          : `<button type="button" class="option" role="listitem" data-add="${esc(a.id)}">${tile(a)}<span class="main"><span class="name">${esc(a.name)}</span></span></button>`,
-      )
-      .join("") || `<p class="muted" style="padding: 8px 14px">No agents match.</p>`;
+  // Agents installed by hand that Agent Bridge found: run as they are.
+  const found = (state.agents.found ?? []).filter((f) => !q || f.name.toLowerCase().includes(q));
+  const managed = list.filter((a) => a.kind !== "local");
+  const options = managed
+    .map((a) =>
+      a.installedVersion
+        ? `<button type="button" class="option" role="listitem" disabled>${tile(a)}<span class="main"><span class="name">${esc(a.name)}</span></span><span class="installed">${icon("check", { size: 14 })}Installed</span></button>`
+        : `<button type="button" class="option" role="listitem" data-add="${esc(a.id)}">${tile(a)}<span class="main"><span class="name">${esc(a.name)}</span></span></button>`,
+    )
+    .join("");
+  const foundHtml = found.length
+    ? `<p class="menu-label">On this computer</p>` +
+      found
+        .map(
+          (f) =>
+            `<button type="button" class="option" role="listitem" data-local="${esc(f.command)}" data-registry="${esc(f.registryId)}">${tile(f)}<span class="main"><span class="name">${esc(f.name)}</span><span class="sub mono">${esc(f.command)}</span></span></button>`,
+        )
+        .join("") +
+      (options ? `<p class="menu-label">Install</p>` : "")
+    : "";
+  const command = commandOpen
+    ? `<form id="local-form" class="local-form"><input id="local-command" class="field mono" name="command" autocomplete="off" spellcheck="false" placeholder="gemini --acp" aria-label="Command that starts the agent" />` +
+      `<button type="submit" class="send" aria-label="Add">${icon("arrow-up", { stroke: 2.25 })}</button></form>`
+    : `<button type="button" class="option" role="listitem" data-do="command"><span class="tile">${icon("square-terminal", { size: 16 })}</span><span class="main"><span class="name">Use a command</span></span></button>`;
+  const html = foundHtml + (options || (found.length ? "" : `<p class="muted" style="padding: 8px 14px">No agents match.</p>`)) + command;
+  // Rebuild only on change, so a command being typed keeps its focus.
+  if ($("add-list").dataset.html !== html) $("add-list").innerHTML = $("add-list").dataset.html = html;
 }
 $("add-list").addEventListener("click", (e) => {
+  if (e.target.closest("[data-do=command]")) {
+    commandOpen = true;
+    renderAddDialog();
+    return $("local-command").focus();
+  }
+  const local = e.target.closest("[data-local]");
+  if (local) {
+    post({ type: "agent_add_local", command: local.dataset.local, registryId: local.dataset.registry });
+    return $("add-dialog").close();
+  }
   const id = e.target.closest("[data-add]")?.dataset.add;
   if (!id) return;
   post({ type: "agent_install", id });
+  $("add-dialog").close();
+});
+$("add-list").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const command = $("local-command").value.trim();
+  if (!command) return;
+  post({ type: "agent_add_local", command });
   $("add-dialog").close();
 });
 
