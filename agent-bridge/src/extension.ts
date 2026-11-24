@@ -1,3 +1,4 @@
+import { COMPILED, TARGET, VERSION } from "./config.ts";
 import type { Connection, Message } from "./native-messaging.ts";
 
 /** Messages the extension sends to Agent Bridge. */
@@ -29,7 +30,8 @@ export type FromExtension =
   | { type: "auth_start"; agentId: string; methodId: string }
   | { type: "auth_input"; agentId: string; text: string }
   | { type: "auth_cancel"; agentId: string }
-  | { type: "auth_recheck"; agentId: string };
+  | { type: "auth_recheck"; agentId: string }
+  | { type: "bridge_update"; version: string };
 
 export type PageInfo = { tabId?: number; url?: string; title?: string };
 /** An image attached to a message: base64 data for the agent, and a small thumbnail (a data URL) for the chat. */
@@ -65,6 +67,10 @@ export class Extension {
     this.detach();
     this.conn = conn;
     console.log("[extension] connected");
+    // Always the first message, and its shape never changes: the extension
+    // checks the version before anything else (see BRIDGE_VERSION in
+    // extension/background.js) and talks to no other version.
+    conn.send({ type: "bridge_info", version: VERSION, source: !COMPILED, target: TARGET });
     void conn.closed.then(() => {
       if (this.conn !== conn) return;
       console.log("[extension] disconnected");

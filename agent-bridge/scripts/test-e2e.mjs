@@ -124,6 +124,10 @@ const registered = async (n) => {
   return [];
 };
 const ids = await registered(10);
+// Agent Bridge reports its version, and it's new enough.
+const bridgeStep = settings.locator("#steps li.done, #setup-done li").filter({ hasText: "Agent Bridge running" });
+await bridgeStep.first().waitFor({ timeout: 5000 }).catch(() => {});
+check("Settings sees a current Agent Bridge", (await bridgeStep.count()) > 0, await settings.locator("#setup").innerText().catch(() => ""));
 await settings.close();
 check("mods registered", ids.length === 10, JSON.stringify(ids));
 

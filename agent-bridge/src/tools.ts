@@ -21,7 +21,7 @@ function socketPath() {
 
 /**
  * Serves the browser tools to agents. Each conversation gets a token and an
- * MCP server declaration for session/new: the agent starts `agent-bridge mcp`,
+ * MCP server declaration for session/new: the agent starts `eyepatch-agent-bridge mcp`,
  * which connects here and presents its token, and its tool calls run against
  * that conversation's tab. Works with any ACP agent (stdio MCP servers are
  * required by ACP).
@@ -93,7 +93,7 @@ export class ToolServer {
 }
 
 /**
- * `agent-bridge mcp`: the browser tools' MCP server as the agent sees it, a
+ * `eyepatch-agent-bridge mcp`: the browser tools' MCP server as the agent sees it, a
  * stdio server it starts for each conversation. It's only a pipe to the
  * Agent Bridge that started the agent: it connects to its socket, presents
  * the conversation's token, and passes MCP messages through both ways.

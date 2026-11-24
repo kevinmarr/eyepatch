@@ -22,6 +22,8 @@ type Deps = {
   onReady: (agent: AgentProcess) => void;
   /** The process went away: every session on it is gone. */
   onReset: (agent: AgentProcess) => void;
+  /** Restart it once no chat is mid-reply (for new credentials). */
+  restartWhenIdle: (agent: AgentProcess) => void;
 };
 
 /**
@@ -51,7 +53,7 @@ export class AgentProcess {
       send: (msg) => deps.send({ ...msg, agentId: id }),
       conn: () => this.conn,
       launchSpec: () => deps.agents.launchSpec(id),
-      restartAgent: () => this.restart(),
+      restartAgent: () => deps.restartWhenIdle(this),
     });
   }
 

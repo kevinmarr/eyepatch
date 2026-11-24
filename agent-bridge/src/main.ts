@@ -25,8 +25,8 @@ const USAGE = `Eyepatch Agent Bridge ${VERSION}
 Runs coding agents for the Eyepatch Chrome extension, which starts it on
 demand. To set it up, run:
 
-  agent-bridge install      register with your Chromium-based browsers
-  agent-bridge uninstall    remove the registration
+  eyepatch-agent-bridge install     register with your Chromium-based browsers
+  eyepatch-agent-bridge uninstall   remove the registration
 
 Data lives in ${HOME}.`;
 

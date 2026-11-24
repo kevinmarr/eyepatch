@@ -72,14 +72,59 @@ function render(s) {
 
 // ---------- setup ----------
 
-// Until there's an installer: register the dev host once, then run Agent Bridge in a terminal.
-const INSTALL_COMMAND = "cd agent-bridge && bun install && bun run register:dev && bun run dev";
+// install.sh / install.ps1 download an Agent Bridge release and register it.
+// They install the exact version this extension talks to; after that,
+// Eyepatch updates Agent Bridge itself.
+const PLATFORM = DEMO ? (new URLSearchParams(location.search).get("os") ?? "mac") : (await chrome.runtime.getPlatformInfo()).os;
+const SCRIPTS = "https://raw.githubusercontent.com/kevinmarr/eyepatch/main";
+const installCommand = (v) =>
+  ({
+    mac: `curl -fsSL ${SCRIPTS}/install.sh | EYEPATCH_VERSION=${v} sh`,
+    linux: `curl -fsSL ${SCRIPTS}/install.sh | EYEPATCH_VERSION=${v} sh`,
+    win: `$env:EYEPATCH_VERSION="${v}"; irm ${SCRIPTS}/install.ps1 | iex`,
+  })[PLATFORM];
+// Loaded unpacked (no store update URL): probably working on Eyepatch itself,
+// with Agent Bridge running from source (see the README's Dev loop).
+const UNPACKED = DEMO || !chrome.runtime.getManifest().update_url;
+const DEV_INSTALL_COMMAND = "cd agent-bridge && bun install && bun run register:dev && bun run dev";
 const START_COMMAND = "cd agent-bridge && bun run dev";
+
+const commandBox = (command) =>
+  `<div class="command"><code>${esc(command)}</code><button type="button" class="icon-btn" data-copy="${esc(command)}" aria-label="Copy command" title="Copy">${icon("copy", { size: 15 })}</button></div>`;
+
+/** How to install, update or start Agent Bridge, for the first setup step. */
+function bridgeStep(s) {
+  const spinner = (text) => `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}${text}</span>`;
+  const waiting = spinner("Waiting for Agent Bridge…");
+  const command = installCommand(s.bridgeWanted);
+  const install = command ? commandBox(command) : `<span class="muted">Agent Bridge runs on macOS, Windows and Linux.</span>`;
+  switch (s.bridgeProblem) {
+    case "dev_down":
+      return { todo: "Start Agent Bridge", body: commandBox(START_COMMAND) + waiting };
+    case "updating":
+      return { todo: "Update Agent Bridge", body: spinner(`Updating to ${esc(s.bridgeWanted)}…`) };
+    case "updating_extension":
+      return { todo: "Update Eyepatch", body: spinner("Updating…") };
+    case "extension_outdated":
+      return {
+        todo: "Update Eyepatch",
+        body: `<span class="error-text">Agent Bridge ${esc(s.bridgeVersion)} needs a newer Eyepatch, and no update is available yet. Mods keep running.</span>`,
+      };
+    case "too_old":
+      return { todo: "Update Agent Bridge", body: install + waiting };
+    case "update_failed":
+      return { todo: "Update Agent Bridge", body: `<span class="error-text">Couldn’t update to ${esc(s.bridgeWanted)}: ${esc(s.bridgeDetail)}</span>` + install + waiting };
+  }
+  // Anything else Chrome reported (e.g. it crashed on start) is worth showing.
+  const problem = s.bridgeProblem && s.bridgeProblem !== "missing" ? `<span class="error-text">${esc(s.bridgeProblem)}</span>` : "";
+  const dev = UNPACKED ? `<div class="from-source"><span class="muted">From source</span>${commandBox(DEV_INSTALL_COMMAND)}</div>` : "";
+  return { todo: "Install Agent Bridge", body: install + dev + problem + waiting };
+}
 
 function renderSetup(s) {
   const hasAgent = Boolean(s.agents?.custom || s.agents?.list.some((a) => a.installedVersion));
   const steps = [
-    { done: s.connected, name: "Agent Bridge running", todo: s.bridgeProblem === "dev_down" ? "Start Agent Bridge" : "Install Agent Bridge" },
+    { done: s.connected, name: "Agent Bridge running", ...bridgeStep(s) },
     { done: s.userScripts, name: "User scripts allowed", todo: "Allow user scripts" },
     { done: hasAgent, name: "Agent installed", todo: "Install an agent" },
   ];
@@ -92,13 +137,8 @@ function renderSetup(s) {
     return;
   }
   $("setup-count").textContent = `${done} of ${steps.length}`;
-  const command = s.bridgeProblem === "dev_down" ? START_COMMAND : INSTALL_COMMAND;
-  // Anything else Chrome reported (e.g. it crashed on start) is worth showing.
-  const problem = s.bridgeProblem && !["missing", "dev_down"].includes(s.bridgeProblem) ? s.bridgeProblem : null;
   const bodies = [
-    `<div class="command"><code>${esc(command)}</code><button type="button" class="icon-btn" data-copy="${esc(command)}" aria-label="Copy command" title="Copy">${icon("copy", { size: 15 })}</button></div>` +
-      (problem ? `<span class="error-text">${esc(problem)}</span>` : "") +
-      `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}Waiting for Agent Bridge…</span>`,
+    steps[0].body,
     `<div><button type="button" class="btn primary" data-action="user-scripts">Open extension settings</button></div>`,
     s.connected ? `<div><button type="button" class="btn primary" data-action="add-agent">Choose an agent</button></div>` : "",
   ];
@@ -192,6 +232,8 @@ function agentRow(a, auth, agents) {
   let sub = "";
   if (auth?.signIn) sub = `<span class="sub">Authenticating</span>`;
   else if (picking === a.id) sub = `<span class="sub">Choose how to authenticate</span>`;
+  else if (auth?.restartPending) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Restarting after the current reply…</span>`;
+  else if (auth?.checking) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Checking…</span>`;
   else if (failed) sub = `<span class="sub danger">Authentication failed: ${esc(auth.error)}</span>`;
   else if (unauthenticated) sub = `<span class="sub danger">Not authenticated</span>`;
   else if (updating) sub = `<span class="sub">${icon("loader-circle", { size: 13, stroke: 2.25, cls: "spin" })}Updating…</span>`;
@@ -201,6 +243,8 @@ function agentRow(a, auth, agents) {
   if (inFlow) {
     actions = `<button type="button" class="icon-btn lg" data-do="cancel" aria-label="Cancel authentication for ${esc(a.name)}" title="Cancel">${icon("x")}</button>`;
   } else {
+    // Authenticated somewhere else (e.g. in a terminal): ask the agent again.
+    if (unauthenticated && !auth.checking) actions += `<button type="button" class="btn quiet" data-do="recheck">Check again</button>`;
     if (failed && auth.methods.length) actions += `<button type="button" class="btn primary" data-do="auth">Try again</button>`;
     else if (unauthenticated && auth.methods.length) actions += `<button type="button" class="btn primary" data-do="auth">Authenticate</button>`;
     const items = [];
@@ -259,6 +303,7 @@ $("agents").addEventListener("click", (e) => {
   e.stopPropagation();
   if (what === "menu") menuFor = menuFor === a.id ? null : a.id;
   else if (what === "auth") return startAuth(a, auth);
+  else if (what === "recheck") post({ type: "auth_recheck", agentId: a.id });
   else if (what === "cancel") {
     if (auth?.signIn) post({ type: "auth_cancel", agentId: a.id });
     picking = null;

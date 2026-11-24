@@ -142,13 +142,13 @@ function renderAlerts() {
   const alert = (text, action = "") =>
     `<div class="alert" role="alert">${icon("circle-alert")}<div class="body"><span>${text}</span>${action}</div></div>`;
   if (!c.connected) {
-    const missing = c.problem === "missing";
-    alerts.push(
-      alert(
-        missing ? `Agent Bridge isn’t installed.` : `Can’t reach Agent Bridge.`,
-        `<button type="button" class="btn outline" data-action="bridge-help">${missing ? "How to install it" : "How to start it"} ${icon("square-arrow-out-up-right", { size: 15 })}</button>`,
-      ),
-    );
+    const help = (label) => `<button type="button" class="btn outline" data-action="bridge-help">${label} ${icon("square-arrow-out-up-right", { size: 15 })}</button>`;
+    if (c.problem === "updating") alerts.push(alert(`Updating Agent Bridge…`));
+    else if (c.problem === "updating_extension") alerts.push(alert(`Updating Eyepatch…`));
+    else if (c.problem === "extension_outdated") alerts.push(alert(`Agent Bridge ${esc(c.version)} needs a newer Eyepatch, and no update is available yet. Mods keep running.`));
+    else if (c.problem === "too_old" || c.problem === "update_failed") alerts.push(alert(`Agent Bridge needs updating.`, help("How to update it")));
+    else if (c.problem === "missing") alerts.push(alert(`Agent Bridge isn’t installed.`, help("How to install it")));
+    else alerts.push(alert(`Can’t reach Agent Bridge.`, help("How to start it")));
   }
   if (c.connected && !c.needsAgent && needsAuth(s)) {
     alerts.push(alert(`${esc(s.auth.agent)} needs to authenticate.`, `<button type="button" class="btn primary" data-action="authenticate">Authenticate</button>`));

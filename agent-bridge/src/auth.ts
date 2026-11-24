@@ -41,8 +41,8 @@ type Deps = {
   send: (msg: Record<string, unknown>) => void;
   conn: () => acp.ClientConnection | undefined;
   launchSpec: () => LaunchSpec | undefined;
-  /** Restart the agent process so it picks up new credentials or env. */
-  restartAgent: () => Promise<void>;
+  /** Restart the agent process so it picks up new credentials, once no chat is mid-reply. */
+  restartAgent: () => void;
 };
 
 type SignIn = { methodId: string; name: string; output: string; child?: Subprocess<"pipe", "pipe", "pipe">; cancelled?: boolean };
@@ -55,11 +55,16 @@ export class AuthManager {
   private accounts: acp.AuthAccount[] = [];
   private signIn: SignIn | null = null;
   private error: string | null = null;
+  /** Asked to check again (a restart and a fresh status), until the answer's in. */
+  private checking = false;
+  /** Signed in; waiting to restart the agent until its replies in progress finish. */
+  private restartPending = false;
 
   constructor(private readonly deps: Deps) {}
 
   /** Call after each `initialize` (including after a restart). */
   onInitialized(init: acp.InitializeResponse) {
+    this.restartPending = false;
     this.agentName = init.agentInfo?.title ?? init.agentInfo?.name ?? "agent";
     // Skip malformed entries (no id to sign in with, or no name to show).
     this.methods = (init.authMethods ?? []).filter((m) => m.id && m.name);
@@ -110,7 +115,19 @@ export class AuthManager {
     } else if (conn) {
       await this.probe(conn);
     }
+    this.checking = false;
     this.send();
+  }
+
+  /** "Check again": the caller restarts the agent, and its status comes in after. */
+  beginCheck() {
+    this.checking = true;
+    this.send();
+    setTimeout(() => {
+      if (!this.checking) return;
+      this.checking = false;
+      this.send();
+    }, 30_000);
   }
 
   /**
@@ -153,6 +170,8 @@ export class AuthManager {
       })),
       signIn: this.signIn && { methodId: this.signIn.methodId, name: this.signIn.name, output: this.signIn.output },
       error: this.error,
+      checking: this.checking,
+      restartPending: this.restartPending,
     };
   }
 
@@ -205,8 +224,9 @@ export class AuthManager {
       if (run.cancelled) return this.send();
       if (code === 0) {
         console.log(`[auth] ${method.id} finished; restarting agent`);
+        this.restartPending = true;
         this.send();
-        await this.deps.restartAgent();
+        this.deps.restartAgent();
       } else {
         const tail = run.output.trim().split("\n").slice(-3).join(" ");
         this.fail(`it didn't finish (exit ${code}).${tail ? ` ${tail}` : ""}`);
