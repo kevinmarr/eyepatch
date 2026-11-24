@@ -22,7 +22,7 @@
         1,
         "2"
       ],
-      "u": "ünï €"
+      "u": "\u00fcn\u00ef \u20ac"
     },
     "getValue returns a copy": {
       "x": 1
@@ -241,6 +241,10 @@
       "ran": true,
       "readyState": "complete",
       "sawStoredValue": true
-    }
+    },
+    "unsafeWindow reads page globals": 7,
+    "unsafeWindow sets page globals": 5,
+    "unsafeWindow calls page functions, with callbacks": "2,4,6",
+    "unsafeWindow.document is the page's": "suite-out"
   }
 }

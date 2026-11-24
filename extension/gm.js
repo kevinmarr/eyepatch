@@ -38,7 +38,7 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
     for (const m of list) {
       if (m.error || !m.enabled || m.kind !== "js") continue;
       const { id, name, enabled, grants, connects, matches, excludeMatches, filter } = m;
-      next.set(id, { id, name, enabled, grants: grants ?? [], connects: connects ?? [], matches, excludeMatches, filter, token: mods.get(id)?.token ?? randomToken() });
+      next.set(id, { id, name, enabled, grants: grants ?? [], connects: connects ?? [], matches, excludeMatches, filter, token: mods.get(id)?.token ?? randomToken(), channel: mods.get(id)?.channel ?? randomToken() });
     }
     mods = next;
     await chrome.storage.local.set({ gmMods: Object.fromEntries(mods) }).catch(() => {});
@@ -47,6 +47,8 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
   }
 
   const getMod = (id) => mods.get(id);
+  /** The name of a mod's unsafeWindow bridge (see unsafe-window.js); kept with its token. */
+  const channelFor = (id) => mods.get(id)?.channel;
   // ---------- storage ----------
   // Each mod's values live in chrome.storage.local under "gmv:<mod id>".
 
@@ -391,5 +393,5 @@ export function createGmHost({ onMenusChanged, onValuesChanged }) {
     });
   }
 
-  return { setMods, readValues, onMessage, onConnect, menusFor, runMenu, navigationStarted, pruneMenus, forgetTab, forget };
+  return { setMods, channelFor, readValues, onMessage, onConnect, menusFor, runMenu, navigationStarted, pruneMenus, forgetTab, forget };
 }

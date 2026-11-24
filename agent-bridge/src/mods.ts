@@ -267,9 +267,11 @@ GM_addStyle(\`.Layout-sidebar { display: none !important; }\`);
 - \`@match\` / \`@exclude-match\` use Chrome match patterns (\`https://*.example.com/*\`).
   \`@include\` / \`@exclude\` globs and \`/regexes/\` work too, but prefer \`@match\`.
 - \`@inject-into content\` (use this by default) runs in an isolated world that sees
-  the DOM only. Use \`@inject-into page\` only when the script must touch the page's
-  own JS globals; GM functions that need the extension (storage, requests, menu
-  commands, tabs, notifications) don't work there. Without \`@inject-into\`, a
+  the DOM only. To read or call the page's own JS globals from there, use
+  \`unsafeWindow\` (e.g. \`unsafeWindow.appConfig\`); each access crosses worlds,
+  so don't use it in hot loops. Use \`@inject-into page\` only when the script must
+  run as the page's own code; GM functions that need the extension (storage,
+  requests, menu commands, tabs, notifications) don't work there. Without \`@inject-into\`, a
   script that grants nothing runs in the page, as in Tampermonkey.
 - Add \`@noframes\` unless the script should also run inside iframes.
 - \`@grant\` each GM function you use. Supported: \`GM_addStyle\`, \`GM_addElement\`,

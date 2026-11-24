@@ -5,6 +5,7 @@
 // themselves.
 
 import { ruleMatches } from "./match.js";
+import { pageBridge, windowProxy } from "./unsafe-window.js";
 
 export const styleId = (modId) => `eyepatch-${modId}`;
 
@@ -77,9 +78,10 @@ export const usesStorage = (mod) => STORAGE_GRANTS.some((g) => mod.grants?.inclu
 /**
  * A userscript, run the way userscript managers run them: inside a function
  * whose parameters are its GM API, after its @require files. `token` lets
- * its GM API reach the extension (see gm.js).
+ * its GM API reach the extension (see gm.js). `channel` names the bridge to
+ * the page's window, for unsafeWindow (see unsafe-window.js).
  */
-export function jsCode(mod, version, token) {
+export function jsCode(mod, version, token, channel) {
   const granted = (mod.info?.script?.grant ?? []).flatMap((g) => g.split(/\s+/)).filter((g) => /^GM[._]\w+$/.test(g));
   // Granted but unsupported GM_ functions become stubs that say so.
   const stubs = granted.filter((g) => g.startsWith("GM_") && !GM_NAMES.includes(g));
@@ -94,8 +96,9 @@ export function jsCode(mod, version, token) {
     resources: mod.resources ?? {},
     filter: mod.filter ?? null,
     info: { ...(mod.info ?? {}), version },
+    unsafeChannel: channel ?? null,
   };
-  return `(${gmRuntime})(${ruleMatches}, ${JSON.stringify(cfg)}, ${JSON.stringify(names)}, function (${names.join(", ")}) {
+  return `(${gmRuntime})(${ruleMatches}, ${windowProxy}, ${JSON.stringify(cfg)}, ${JSON.stringify(names)}, function (${names.join(", ")}) {
 ${(mod.requires ?? []).join("\n;\n")}
 ${mod.js ?? ""}
 });`;
@@ -108,8 +111,14 @@ ${mod.js ?? ""}
  */
 export const valuesCode = (values) => `globalThis.__eyepatchValues = ${JSON.stringify(values ?? {})};`;
 
-/** `token` and `values` are only used by scripts with GM grants. */
-export function scriptsFor(mod, version, token, values) {
+/** Whether a script (or its @require files) uses unsafeWindow. */
+const usesUnsafeWindow = (mod) => [mod.js ?? "", ...(mod.requires ?? [])].some((code) => code.includes("unsafeWindow"));
+
+/**
+ * `token` and `values` are only used by scripts with GM grants; `channelId`
+ * (stable per mod) by scripts that use unsafeWindow.
+ */
+export function scriptsFor(mod, version, token, values, channelId) {
   if (mod.error || !mod.enabled) return [];
   const common = { matches: mod.matches, excludeMatches: mod.excludeMatches ?? [] };
   const out = [{ ...common, id: `mod:${mod.id}:ran`, js: [{ code: reportCode(mod) }], runAt: "document_start", world: "USER_SCRIPT" }];
@@ -117,7 +126,13 @@ export function scriptsFor(mod, version, token, values) {
     out.push({ ...common, id: `mod:${mod.id}:css`, js: [{ code: cssCode(mod) }], runAt: "document_start", world: "USER_SCRIPT", allFrames: mod.allFrames });
   } else {
     const world = mod.world === "main" ? { world: "MAIN" } : { world: "USER_SCRIPT", worldId: worldIdOf(mod.id) };
-    const js = [{ code: jsCode(mod, version, token) }];
+    // In an isolated world, unsafeWindow reaches the page's window through a
+    // bridge that runs in the page first (registered before the script).
+    const channel = mod.world !== "main" && channelId && usesUnsafeWindow(mod) ? `eyepatch-uw-${channelId}` : null;
+    if (channel) {
+      out.push({ ...common, id: `mod:${mod.id}:page`, js: [{ code: `(${pageBridge})(${JSON.stringify(channel)});` }], runAt: "document_start", allFrames: mod.allFrames, world: "MAIN" });
+    }
+    const js = [{ code: jsCode(mod, version, token, channel) }];
     if (mod.world !== "main" && usesStorage(mod)) js.unshift({ code: valuesCode(values) });
     out.push({ ...common, id: `mod:${mod.id}:js`, js, runAt: mod.runAt, allFrames: mod.allFrames, ...world });
   }
@@ -130,7 +145,7 @@ export function scriptsFor(mod, version, token, values) {
  * chrome.runtime messaging (see gm.js); in the page's own world only the
  * functions that need nothing from the extension work.
  */
-export function gmRuntime(ruleMatches, cfg, names, body) {
+export function gmRuntime(ruleMatches, windowProxy, cfg, names, body) {
   const href = location.href;
   if (cfg.filter && (!cfg.filter.any.some((r) => ruleMatches(r, href)) || cfg.filter.none.some((r) => ruleMatches(r, href)))) return;
 
@@ -458,7 +473,15 @@ export function gmRuntime(ruleMatches, cfg, names, body) {
     log: (...a) => console.log(...a),
   };
   const asyncNames = { xmlhttpRequest: "xmlHttpRequest", getResourceURL: "getResourceUrl" };
-  const api = { GM_info: info, unsafeWindow: window };
+  let pageWindow = window;
+  if (cfg.unsafeChannel) {
+    try {
+      pageWindow = windowProxy(cfg.unsafeChannel);
+    } catch (e) {
+      logError(e);
+    }
+  }
+  const api = { GM_info: info, unsafeWindow: pageWindow };
   const GM = { info };
   for (const [name, fn] of Object.entries(fns)) {
     if (!grants.has(name)) continue;

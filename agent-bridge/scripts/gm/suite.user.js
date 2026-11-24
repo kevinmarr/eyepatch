@@ -296,5 +296,14 @@
     return [typeof t, typeof t.close, t.closed];
   });
 
+  // suite.html sets window.appState = 7 in the page.
+  await test("unsafeWindow reads page globals", () => unsafeWindow.appState);
+  await test("unsafeWindow sets page globals", () => {
+    unsafeWindow.fromScript = { n: 5 };
+    return unsafeWindow.fromScript.n;
+  });
+  await test("unsafeWindow calls page functions, with callbacks", () => unsafeWindow.Array.from([1, 2, 3], (x) => x * 2).join(","));
+  await test("unsafeWindow.document is the page's", () => unsafeWindow.document.getElementById("suite-out").id);
+
   root.gmSuite = JSON.stringify(results);
 })();

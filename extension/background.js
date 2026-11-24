@@ -1064,7 +1064,7 @@ async function syncMods(mods, changed, reloadTabs = null) {
       continue;
     }
     // Register per mod so one bad match pattern doesn't block the rest.
-    const scripts = scriptsFor(mod, version, tokenFor(mod.id), usesStorage(mod) ? await gm.readValues(mod.id) : undefined);
+    const scripts = scriptsFor(mod, version, tokenFor(mod.id), usesStorage(mod) ? await gm.readValues(mod.id) : undefined, gm.channelFor(mod.id));
     if (!scripts.length) continue;
     try {
       // The GM API messages the extension from the mod's own world.
@@ -1323,7 +1323,7 @@ chrome.runtime.onUserScriptConnect?.addListener((port) => gm.onConnect(port));
 async function updateModValues(modId, values) {
   const mod = lastMods.get(modId);
   if (!mod || mod.error || !mod.enabled || !userScriptsAvailable()) return;
-  const js = scriptsFor(mod, chrome.runtime.getManifest().version, tokenFor(modId), values).find((s) => s.id.endsWith(":js"));
+  const js = scriptsFor(mod, chrome.runtime.getManifest().version, tokenFor(modId), values, gm.channelFor(modId)).find((s) => s.id.endsWith(":js"));
   if (js) await chrome.userScripts.update([js]).catch((e) => console.warn(`[eyepatch] ${modId}:`, e));
 }
 

@@ -49,9 +49,9 @@ the side panel, or not at all:
 - **Updates for imported mods:** scripts from Greasy Fork and similar have
   `@updateURL`/`@downloadURL`. Check them, offer the update in Settings, and
   stop once the agent or the user has edited the file.
-- **`unsafeWindow`** in isolated scripts is the isolated `window`, not the
-  page's. Scripts that grant GM functions and also read page globals need
-  `@inject-into page`, where those GM functions don't work.
+- **`unsafeWindow`** in isolated scripts is a bridge to the page's `window`
+  (`extension/unsafe-window.js`). Untested with real-world scripts (e.g. ones
+  that hook page functions heavily); each access is a synchronous round trip.
 - **More of the GM API:** `GM_download`, `GM_cookie`, `GM_getTab`/`GM_saveTab`,
   `GM_webRequest`; forbidden request headers in `GM_xmlhttpRequest` (needs
   `declarativeNetRequest`); `GM_notification` click callbacks.
