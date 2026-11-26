@@ -15,6 +15,11 @@ installed agents with sign-in, and the agent catalog. Still needed:
   install finishes and the agent reports it's signed out, open its
   authentication methods (or start the only one) right away, and don't show
   the red line during setup.
+- **Say what to do once setup is done.** After the last step, Settings just
+  shows the checks and leaves you wondering what's next. Tell people to open
+  a website and click Eyepatch's toolbar icon (perhaps pin it to the toolbar
+  first) to open the side panel and ask for a change. Maybe a button that
+  opens an example page with the panel ready.
 
 - **Signing secrets:** the release workflow signs and notarizes the macOS
   builds once the Apple secrets it lists are set; until then they're ad-hoc
