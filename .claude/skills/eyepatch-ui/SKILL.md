@@ -43,6 +43,9 @@ design review; this skill is how to keep new UI consistent with it.
   switch automatically. Check both.
 - **Focus rings** only for keyboard use (`body.pointer` after a pointer press).
 - **Motion** is minimal and stops under `prefers-reduced-motion`.
+- **Spinners** mean Eyepatch is busy ("Updating…", "Checking…"). Never show
+  one while waiting for the user to do something (run a command, flip a
+  setting): the page updates by itself when they do.
 - Everything works at a 320 px panel width.
 
 ## Type and size
