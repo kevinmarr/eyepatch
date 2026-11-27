@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Eyepatch",
+  "name": "Eyepatch: Customize Websites Using Your Coding Agent",
   "version": "0.1.0",
-  "description": "Change how any website looks and works by chatting with a coding agent on your computer.",
+  "description": "Customize websites using your coding agent. Hide distractions, change styles, add your own features.",
   "minimum_chrome_version": "135",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs4hSGJz5li7fXzlaZUqAdxXsjUryOD3OUtRrSv7PoD27muyH5KEr5lGbPbKeBIdkhZGE/KbpYsLCFTUez+lCx3l0dO1zXq989lEEczntop7iuHL7e3Xm/qExq/+OOdRxv67WhvMR+Bp9xhY9dp6RxWRSnfNIK5R3ww3sZtU9/QhPeiJ2eJpxbEzEVZgPIg2liCDpP0eqnUX5I6CQGq86uOM19Y9jRsGSXpEGrkXOly79LJ4ReR8vHWc4PPZXuQGZkP60jCWFazX2D82Jvfd5jr20cAFIayiOLu2meBq2f92hJulB4VljaaqCB1bcCWFGFdJ2x4AB+Y1g4jCRiMkZxwIDAQAB",
   "icons": {
