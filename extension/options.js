@@ -94,13 +94,13 @@ const commandBox = (command) =>
 
 /** How to install, update or start Agent Bridge, for the first setup step. */
 function bridgeStep(s) {
-  const spinner = (text) => `<span class="waiting">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}${text}</span>`;
-  const waiting = spinner("Waiting for Agent Bridge…");
+  // A spinner only while Eyepatch is busy, never while it's waiting for you to run a command.
+  const spinner = (text) => `<span class="working">${icon("loader-circle", { size: 15, stroke: 2.25, cls: "spin" })}${text}</span>`;
   const command = installCommand(s.bridgeWanted);
   const install = command ? commandBox(command) : `<span class="muted">Agent Bridge runs on macOS, Windows and Linux.</span>`;
   switch (s.bridgeProblem) {
     case "dev_down":
-      return { todo: "Start Agent Bridge", body: commandBox(START_COMMAND) + waiting };
+      return { todo: "Start Agent Bridge", body: commandBox(START_COMMAND) };
     case "updating":
       return { todo: "Update Agent Bridge", body: spinner(`Updating to ${esc(s.bridgeWanted)}…`) };
     case "updating_extension":
@@ -111,14 +111,14 @@ function bridgeStep(s) {
         body: `<span class="error-text">Agent Bridge ${esc(s.bridgeVersion)} needs a newer Eyepatch, and no update is available yet. Mods keep running.</span>`,
       };
     case "too_old":
-      return { todo: "Update Agent Bridge", body: install + waiting };
+      return { todo: "Update Agent Bridge", body: install };
     case "update_failed":
-      return { todo: "Update Agent Bridge", body: `<span class="error-text">Couldn’t update to ${esc(s.bridgeWanted)}: ${esc(s.bridgeDetail)}</span>` + install + waiting };
+      return { todo: "Update Agent Bridge", body: `<span class="error-text">Couldn’t update to ${esc(s.bridgeWanted)}: ${esc(s.bridgeDetail)}</span>` + install };
   }
   // Anything else Chrome reported (e.g. it crashed on start) is worth showing.
   const problem = s.bridgeProblem && s.bridgeProblem !== "missing" ? `<span class="error-text">${esc(s.bridgeProblem)}</span>` : "";
   const dev = UNPACKED ? `<div class="from-source"><span class="muted">From source</span>${commandBox(DEV_INSTALL_COMMAND)}</div>` : "";
-  return { todo: "Install Agent Bridge", body: install + dev + problem + waiting };
+  return { todo: "Install Agent Bridge", body: install + dev + problem };
 }
 
 function renderSetup(s) {

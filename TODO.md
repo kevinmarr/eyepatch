@@ -9,6 +9,18 @@ The Options page is the setup page: Chrome opens it on install, and it has a
 checklist (Agent Bridge running, Allow User Scripts, an agent installed), the
 installed agents with sign-in, and the agent catalog. Still needed:
 
+- **Go straight to sign-in after installing an agent.** Today a freshly
+  installed agent that isn't signed in shows a red "Not authenticated", as if
+  something went wrong, and you have to click Authenticate. Instead, once the
+  install finishes and the agent reports it's signed out, open its
+  authentication methods (or start the only one) right away, and don't show
+  the red line during setup.
+- **Say what to do once setup is done.** After the last step, Settings just
+  shows the checks and leaves you wondering what's next. Tell people to open
+  a website and click Eyepatch's toolbar icon (perhaps pin it to the toolbar
+  first) to open the side panel and ask for a change. Maybe a button that
+  opens an example page with the panel ready.
+
 - **Signing secrets:** the release workflow signs and notarizes the macOS
   builds once the Apple secrets it lists are set; until then they're ad-hoc
   signed (fine with the `curl | sh` installer, which doesn't quarantine).

@@ -36,7 +36,9 @@ if (!args.includes("--skip-release-check")) {
   }
 }
 
-const stage = fs.mkdtempSync(path.join(root, "agent-bridge", "dist", ".package-"));
+const dist = path.join(root, "agent-bridge", "dist");
+fs.mkdirSync(dist, { recursive: true }); // not there until something's been built
+const stage = fs.mkdtempSync(path.join(dist, ".package-"));
 try {
   fs.cpSync(ext, stage, { recursive: true, filter: (src) => !DEV_ONLY.includes(path.relative(ext, src)) && !path.basename(src).startsWith(".") });
   delete manifest.key;
@@ -54,7 +56,7 @@ try {
     }
   }
 
-  const out = path.join(root, "agent-bridge", "dist", `eyepatch-${manifest.version}${keyFile ? "-first-upload" : ""}.zip`);
+  const out = path.join(dist, `eyepatch-${manifest.version}${keyFile ? "-first-upload" : ""}.zip`);
   fs.rmSync(out, { force: true });
   await $`zip -q -r -X ${out} .`.cwd(stage);
   console.log(`${path.relative(root, out)}: Eyepatch ${manifest.version}, talks to Agent Bridge ${bridgeVersion}${keyFile ? ", with key.pem (first upload only)" : ""}`);

@@ -57,7 +57,7 @@ asset="eyepatch-agent-bridge-$target.tar.gz"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-echo "Downloading Eyepatch Agent Bridge for $target…"
+echo "Downloading Eyepatch Agent Bridge for ${target}..."
 curl -fL --progress-bar "$base/$asset" -o "$tmp/$asset" || fail "couldn't download $base/$asset"
 curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail "couldn't download $base/SHA256SUMS"
 
